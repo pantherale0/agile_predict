@@ -32,7 +32,7 @@ class Settings(BaseSettings):
     DEBUG: bool = False
     
     # Database
-    DATABASE_URL: str = "sqlite:///./agile_predict.db"
+    DATABASE_URL: str = "sqlite:///./db.sqlite3"
     SQLALCHEMY_ECHO: bool = False
     
     # Security

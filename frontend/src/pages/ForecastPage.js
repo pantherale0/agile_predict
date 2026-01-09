@@ -50,18 +50,24 @@ function ForecastPage() {
       fetchActualPrices(days)
     ])
       .then(([priceRes, genRes, actualRes]) => {
-        // Extract and map price data
+        // Extract and map price data from FastAPI response
         let priceData = [];
-        if (priceRes.data && priceRes.data.results && priceRes.data.results.length > 0) {
-          priceData = priceRes.data.results[0].prices.map(p => ({
-            ...p,
-            timestamp: p.date_time
-          }));
+        const priceResults = Array.isArray(priceRes.data) ? priceRes.data : [];
+        
+        if (priceResults.length > 0) {
+          // The response is an array of forecast objects with agile_data nested inside
+          const firstForecast = priceResults[0];
+          if (firstForecast.agile_data) {
+            priceData = firstForecast.agile_data.map(p => ({
+              ...p,
+              timestamp: p.date_time
+            }));
+          }
         }
 
         // Extract and merge generation/demand data
         let genData = {};
-        // Handle both array response (no pagination) and paginated response
+        // Generation endpoint returns a flat array of objects
         const genResults = Array.isArray(genRes.data) ? genRes.data : (genRes.data?.results || []);
         genResults.forEach(item => {
           genData[item.date_time] = {
@@ -101,7 +107,10 @@ function ForecastPage() {
     setHeatmapLoading(true);
     fetchPriceHeatmap()
       .then(res => {
-        setHeatmapData(res.data);
+        // The backend returns stats_chart containing the heatmap Plotly figure
+        setHeatmapData({
+          heatmap: res.data.stats_chart
+        });
         setHeatmapLoading(false);
       })
       .catch(err => {
@@ -119,7 +128,7 @@ function ForecastPage() {
     if (!data.points || data.points.length === 0) return;
     
     const point = data.points[0];
-    const dateStr = point.customdata;
+    const dateStr = point.customdata; // customdata contains the date string
     
     // Verify we have a valid date
     if (!dateStr || dateStr === '') {
@@ -132,7 +141,10 @@ function ForecastPage() {
     
     fetchDailyBreakdown(dateStr)
       .then(res => {
-        setDailyBreakdown(res.data);
+        // The backend returns stats_chart containing the breakdown with chart, stats, and daily_data
+        setDailyBreakdown({
+          chart: res.data.stats_chart?.chart
+        });
         setDailyLoading(false);
       })
       .catch(err => {
@@ -176,15 +188,8 @@ function ForecastPage() {
                     useResizeHandler
                     onClick={handleHeatmapClick}
                   />
-                  <div className="mt-3 row text-muted small">
-                    <div className="col-md-6">
-                      <p><strong>Min:</strong> £{heatmapData.stats.min_price.toFixed(2)}/MWh</p>
-                      <p><strong>Max:</strong> £{heatmapData.stats.max_price.toFixed(2)}/MWh</p>
-                    </div>
-                    <div className="col-md-6">
-                      <p><strong>Avg:</strong> £{heatmapData.stats.avg_price.toFixed(2)}/MWh</p>
-                      <p><strong>Median:</strong> £{heatmapData.stats.median_price.toFixed(2)}/MWh</p>
-                    </div>
+                  <div className="mt-3 text-muted small text-center">
+                    <p>Click on a day to see hourly price breakdown</p>
                   </div>
                 </>
               )}
@@ -225,16 +230,6 @@ function ForecastPage() {
                       style={{ width: '100%' }}
                       useResizeHandler
                     />
-                    <div className="mt-3 row text-muted small">
-                      <div className="col-md-6">
-                        <p><strong>Min:</strong> £{dailyBreakdown.stats.min_price.toFixed(2)}/MWh</p>
-                        <p><strong>Max:</strong> £{dailyBreakdown.stats.max_price.toFixed(2)}/MWh</p>
-                      </div>
-                      <div className="col-md-6">
-                        <p><strong>Avg:</strong> £{dailyBreakdown.stats.avg_price.toFixed(2)}/MWh</p>
-                        <p><strong>Median:</strong> £{dailyBreakdown.stats.median_price.toFixed(2)}/MWh</p>
-                      </div>
-                    </div>
                   </>
                 )}
                 {!dailyLoading && !dailyBreakdown?.chart && (

@@ -1,11 +1,12 @@
 """Statistics and visualization service for generating reports and charts."""
 from sqlalchemy.orm import Session
-from sqlalchemy import desc
+from sqlalchemy import desc, func
 from models import PriceHistory, AgileData, Forecast, ForecastData
 from datetime import datetime, timedelta
 import pandas as pd
 from typing import List, Dict, Any, Optional
 import json
+import plotly.graph_objects as go
 
 
 class StatsService:
@@ -14,20 +15,21 @@ class StatsService:
     @staticmethod
     def get_price_heatmap_data(
         db: Session,
-        days: int = 7,
+        days: int = 365,
     ) -> Dict[str, Any]:
-        """Generate heatmap data for price history."""
-        # Get price history
-        query = db.query(PriceHistory).order_by(desc(PriceHistory.date_time))
-        latest = query.first()
+        """Generate heatmap data for price history - calendar style like Django."""
         
-        if not latest:
+        # Get the latest date in the database
+        latest_record = db.query(PriceHistory).order_by(desc(PriceHistory.date_time)).first()
+        
+        if not latest_record:
             return {
                 "heatmap": None,
                 "message": "No data available for heatmap"
             }
         
-        start_date = latest.date_time - timedelta(days=days)
+        latest_date_result = latest_record.date_time
+        start_date = latest_date_result - timedelta(days=days)
         prices = db.query(PriceHistory).filter(
             PriceHistory.date_time >= start_date
         ).order_by(PriceHistory.date_time).all()
@@ -35,39 +37,92 @@ class StatsService:
         if not prices:
             return {"heatmap": None, "message": "No data in date range"}
         
-        # Create DataFrame
+        # Create DataFrame with date and price
         df = pd.DataFrame({
             'date_time': [p.date_time for p in prices],
             'agile': [p.agile for p in prices],
-            'day_ahead': [p.day_ahead for p in prices],
         })
         
-        df['date'] = df['date_time'].dt.date
-        df['hour'] = df['date_time'].dt.hour
+        # Calculate daily average prices
+        df['date'] = pd.to_datetime(df['date_time']).dt.date
+        daily_avg = df.groupby('date')['agile'].mean().reset_index()
+        daily_avg['date'] = pd.to_datetime(daily_avg['date'])
         
-        # Create pivot for heatmap
-        heatmap_data = df.pivot_table(
+        # Create week and day of week for calendar heatmap
+        daily_avg['year'] = daily_avg['date'].dt.isocalendar().year
+        daily_avg['week'] = daily_avg['date'].dt.isocalendar().week
+        daily_avg['day_of_week'] = daily_avg['date'].dt.day_name()
+        daily_avg['day_num'] = daily_avg['date'].dt.dayofweek  # 0=Mon, 6=Sun
+        
+        # Create pivot table for heatmap (days x weeks)
+        pivot = daily_avg.pivot_table(
+            index='day_num',
+            columns='week',
             values='agile',
-            index='date',
-            columns='hour',
             aggfunc='mean'
         )
         
-        # Convert to JSON-serializable format
-        heatmap_json = {
-            "dates": [str(d) for d in heatmap_data.index],
-            "hours": list(range(24)),
-            "values": heatmap_data.values.tolist(),
-            "min": float(df['agile'].min()),
-            "max": float(df['agile'].max()),
-            "mean": float(df['agile'].mean()),
+        # Create a date mapping for clicking
+        date_mapping = {}
+        for _, row in daily_avg.iterrows():
+            week = row['week']
+            day_num = row['day_num']
+            date_str = row['date'].strftime('%Y-%m-%d')
+            date_mapping[f"{int(week)}_{int(day_num)}"] = date_str
+        
+        # Create customdata array for dates
+        customdata = []
+        for row_idx in range(len(pivot.index)):
+            row_data = []
+            for col_idx in range(len(pivot.columns)):
+                week = int(pivot.columns[col_idx])
+                day_num = int(pivot.index[row_idx])
+                date_str = date_mapping.get(f"{week}_{day_num}", "")
+                row_data.append(date_str)
+            customdata.append(row_data)
+        
+        days_list = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+        
+        # Create plotly figure
+        fig = go.Figure(data=go.Heatmap(
+            z=pivot.values,
+            x=pivot.columns,
+            y=[days_list[i] for i in pivot.index],
+            customdata=customdata,
+            colorscale='RdYlGn_r',  # Red (high prices) to Green (low prices)
+            colorbar=dict(title="Price (p/kWh)"),
+            hovertemplate="Week %{x}<br>%{y}<br>Date: %{customdata}<br>Avg Price: £%{z:.2f}/kWh<extra></extra>"
+        ))
+        
+        fig.update_layout(
+            title="Daily Average Agile Price - Last 365 Days",
+            xaxis_title="Week of Year",
+            yaxis_title="Day of Week",
+            template="plotly_dark",
+            plot_bgcolor="#212529",
+            paper_bgcolor="#343a40",
+            font={"color": "#ccc"},
+            height=400,
+            hovermode='closest'
+        )
+        
+        # Convert to JSON
+        heatmap_json = json.loads(fig.to_json())
+        
+        # Return statistics
+        stats = {
+            "min_price": float(daily_avg['agile'].min()),
+            "max_price": float(daily_avg['agile'].max()),
+            "avg_price": float(daily_avg['agile'].mean()),
+            "median_price": float(daily_avg['agile'].median()),
         }
         
         return {
             "heatmap": heatmap_json,
+            "stats": stats,
             "date_range": {
                 "start": str(start_date),
-                "end": str(latest.date_time),
+                "end": str(latest_date_result),
                 "days": days,
             }
         }
@@ -102,19 +157,63 @@ class StatsService:
         
         df['hour'] = df['date_time'].dt.hour
         
-        # Create hourly breakdown
-        hourly_data = []
-        for _, row in df.iterrows():
-            hourly_data.append({
-                "time": row['date_time'].isoformat(),
-                "hour": int(row['hour']),
-                "agile": float(row['agile']),
-                "day_ahead": float(row['day_ahead']),
-            })
+        # Create Plotly chart format
+        chart_plotly = {
+            "data": [
+                {
+                    "x": [p.date_time.isoformat() for p in prices],
+                    "y": [p.agile for p in prices],
+                    "name": "Agile Price",
+                    "type": "scatter",
+                    "mode": "lines+markers",
+                    "line": {"color": "#007bff"}
+                },
+                {
+                    "x": [p.date_time.isoformat() for p in prices],
+                    "y": [p.day_ahead for p in prices],
+                    "name": "Day Ahead Price",
+                    "type": "scatter",
+                    "mode": "lines+markers",
+                    "line": {"color": "#dc3545"}
+                }
+            ],
+            "layout": {
+                "title": f"Hourly Prices for {target_date.date()}",
+                "xaxis": {
+                    "title": "Time"
+                },
+                "yaxis": {
+                    "title": "Price (p/kWh)"
+                },
+                "hovermode": "x unified",
+                "height": 500,
+                "margin": {
+                    "l": 60,
+                    "r": 60,
+                    "b": 60,
+                    "t": 80
+                }
+            }
+        }
         
         return {
+            "chart": chart_plotly,
             "date": str(target_date.date()),
-            "daily_data": hourly_data,
+            "stats": {
+                "min_price": float(df['agile'].min()),
+                "max_price": float(df['agile'].max()),
+                "avg_price": float(df['agile'].mean()),
+                "median_price": float(df['agile'].median()),
+            },
+            "daily_data": [
+                {
+                    "time": p.date_time.isoformat(),
+                    "hour": int(p.date_time.hour),
+                    "agile": float(p.agile),
+                    "day_ahead": float(p.day_ahead),
+                }
+                for p in prices
+            ],
             "summary": {
                 "min_agile": float(df['agile'].min()),
                 "max_agile": float(df['agile'].max()),

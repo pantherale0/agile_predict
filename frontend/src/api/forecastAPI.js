@@ -3,7 +3,7 @@ import axios from 'axios';
 const API_BASE = process.env.REACT_APP_API_URL || 'http://localhost:8000/api';
 
 export const fetchRegionalForecast = (region, days = 14) => {
-  return axios.get(`${API_BASE}/${region}/`, {
+  return axios.get(`${API_BASE}/forecasts/${region}`, {
     params: {
       days,
       forecast_count: 1,
@@ -13,11 +13,11 @@ export const fetchRegionalForecast = (region, days = 14) => {
 };
 
 export const fetchLatestForecast = () => {
-  return axios.get(`${API_BASE}/`);
+  return axios.get(`${API_BASE}/forecasts/latest`);
 };
 
 export const fetchGenerationDemand = (region, days = 14) => {
-  return axios.get(`${API_BASE}/${region}/generation/`, {
+  return axios.get(`${API_BASE}/prices/${region}/generation`, {
     params: {
       days,
       forecast_count: 1
@@ -26,19 +26,19 @@ export const fetchGenerationDemand = (region, days = 14) => {
 };
 
 export const fetchActualPrices = (days = 14) => {
-  return axios.get(`${API_BASE}/history/actual/`, {
+  return axios.get(`${API_BASE}/prices/history/actual/`, {
     params: { days }
   });
 };
 
 export const fetchStats = () => {
-  return axios.get(`${API_BASE}/stats/`);
+  return axios.get(`${API_BASE}/prices/stats/`);
 };
 
 export const fetchPriceHeatmap = () => {
-  return axios.get(`${API_BASE}/history/heatmap/`);
+  return axios.get(`${API_BASE}/prices/history/heatmap/`);
 };
 
 export const fetchDailyBreakdown = (dateStr) => {
-  return axios.get(`${API_BASE}/history/daily/${dateStr}/`);
+  return axios.get(`${API_BASE}/prices/history/daily/${dateStr}`);
 };

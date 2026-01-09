@@ -103,29 +103,29 @@ def update_forecasts():
         forecast_count = db.query(Forecast).count()
         logger.info(f"Current database state: {history_count} history records, {forecast_count} forecasts")
         
-        # Clean up old/invalid forecasts
+        # Clean up old/invalid forecasts - keep the 5 most recent valid forecasts
         MIN_FORECAST_DATA = 600
+        all_forecasts = db.query(Forecast).order_by(Forecast.created_at.desc()).all()
         forecasts_to_keep = []
         
-        for f in db.query(Forecast).order_by(Forecast.created_at.desc()).all():
+        for f in all_forecasts:
             fd_count = db.query(ForecastData).filter(ForecastData.forecast_id == f.id).count()
-            if fd_count >= MIN_FORECAST_DATA:
+            # Keep up to 5 recent forecasts with sufficient data
+            if fd_count >= MIN_FORECAST_DATA and len(forecasts_to_keep) < 5:
                 dt = pd.to_datetime(f.name).tz_localize("GB")
                 days = (pd.Timestamp.now(tz="GB") - dt).days
                 
-                # Keep forecasts from specific hours within 120 days
+                # Keep forecasts from the last 120 days
                 if days < 120:
-                    for hour in [6, 10, 11, 16, 22]:
-                        if f"{hour:02d}:15" in f.name:
-                            forecasts_to_keep.append(f.id)
-                            break
+                    forecasts_to_keep.append(f.id)
         
         # Delete forecasts not in the keep list
-        forecasts_to_delete = db.query(Forecast).filter(~Forecast.id.in_(forecasts_to_keep)).all()
-        for forecast in forecasts_to_delete:
-            db.delete(forecast)
-        db.commit()
-        logger.info(f"Cleaned up forecasts, keeping {len(forecasts_to_keep)}")
+        if all_forecasts:
+            forecasts_to_delete = db.query(Forecast).filter(~Forecast.id.in_(forecasts_to_keep)).all()
+            for forecast in forecasts_to_delete:
+                db.delete(forecast)
+            db.commit()
+        logger.info(f"Cleaned up forecasts, keeping {len(forecasts_to_keep)} recent ones")
         
         # Get historical prices
         prices, start = model_to_df(db, PriceHistory)
@@ -237,8 +237,8 @@ def update_forecasts():
         
         logger.info(f"Retrieved forecast data from {fc.index[0]} to {fc.index[-1]}")
         
-        # Prepare training data
-        train_X, train_y, test_X, test_y, ff_train = prepare_training_data(db, prices)
+        # Prepare training data (pass current forecast for initial training)
+        train_X, train_y, test_X, test_y, ff_train = prepare_training_data(db, prices, current_forecast=fc)
         
         # Initialize variables for model scoring
         mean_score = 0.0
@@ -314,23 +314,89 @@ def update_latest_agile():
     This is equivalent to: python manage.py latest_agile
     Fetches the latest Agile pricing data from external sources.
     """
+    db = SessionLocal()
     try:
-        db = SessionLocal()
         logger.info("Starting latest Agile prices update task")
         
-        # Get current price count
-        current_prices = db.query(PriceHistory).count()
+        from services.data_utils import get_agile, day_ahead_to_agile, model_to_df
         
-        # TODO: Implement actual Agile price fetching
-        # For now, just log the operation
-        logger.info("Latest Agile prices updated: %s total records", current_prices)
+        # Get historical prices
+        prices_list = db.query(PriceHistory).all()
+        prices = pd.DataFrame([
+            {
+                'date_time': p.date_time,
+                'day_ahead': p.day_ahead,
+                'agile': p.agile
+            }
+            for p in prices_list
+        ])
+        
+        start = pd.Timestamp("2023-07-01", tz="GB")
+        if len(prices) > 0:
+            prices.index = pd.to_datetime(prices["date_time"])
+            prices = prices.sort_index()
+            # Localize tz-naive timestamps to UTC first, then convert to GB
+            if prices.index.tz is None:
+                prices.index = prices.index.tz_localize("UTC")
+            prices.index = prices.index.tz_convert("GB")
+            prices.drop(["date_time"], axis=1, inplace=True)
+            start = prices.index[-1] + pd.Timedelta("30min")
+        
+        logger.info(f"Historical prices loaded. Starting from {start}")
+        
+        # Fetch new Agile prices
+        agile = get_agile(start=start)
+        day_ahead = day_ahead_to_agile(agile, reverse=True)
+        
+        new_prices = pd.concat([day_ahead, agile], axis=1)
+        if len(prices) > 0:
+            new_prices = new_prices[new_prices.index > prices.index[-1]]
+        
+        if len(new_prices) > 0:
+            logger.info(f"Found {len(new_prices)} new price records to add")
+            
+            # Convert timezone-aware index to UTC for storage
+            if new_prices.index.tz is not None:
+                utc_index = new_prices.index.tz_convert('UTC')
+                new_prices.index = utc_index
+                logger.info("Converted Europe/London timezone data to UTC")
+            
+            # Add records in batches
+            batch_size = 500
+            total_added = 0
+            
+            for i in range(0, len(new_prices), batch_size):
+                batch = new_prices.iloc[i:i+batch_size]
+                
+                try:
+                    for timestamp, row in batch.iterrows():
+                        price_record = PriceHistory(
+                            date_time=timestamp,
+                            day_ahead=row['day_ahead'],
+                            agile=row['agile']
+                        )
+                        db.add(price_record)
+                    
+                    db.commit()
+                    total_added += len(batch)
+                    logger.info(f"Batch {i//batch_size + 1}: Added {len(batch)} records ({total_added} total)")
+                except Exception as e:
+                    logger.error(f"Error in batch {i//batch_size + 1}: {e}")
+                    db.rollback()
+                    raise
+            
+            logger.info(f"Successfully added {total_added} new price records")
+        else:
+            logger.info("No new price records found")
+        
         job_status["last_latest_agile"] = datetime.now()
         job_status["last_latest_agile_error"] = None
         
     except Exception as e:
-        logger.error("Latest Agile prices update failed: %s", str(e))
+        logger.error("Latest Agile prices update failed: %s", str(e), exc_info=True)
         job_status["last_latest_agile_error"] = str(e)
         job_status["last_latest_agile"] = datetime.now()
+        db.rollback()
     finally:
         db.close()
 
@@ -339,16 +405,101 @@ def update_national_agile():
     """Update national Agile data.
     
     This is equivalent to: python manage.py national_agile
-    Fetches national-level Agile pricing data.
+    Fetches national-level Agile pricing data for all regions.
     """
+    db = SessionLocal()
     try:
         logger.info("Starting national Agile data update task")
         
-        # TODO: Implement actual national Agile data fetching
-        logger.info("National Agile data updated successfully")
+        from services.data_utils import day_ahead_to_agile
+        
+        # Get all forecast data with day_ahead prices and date_time
+        forecast_data_list = db.query(
+            ForecastData.forecast_id, 
+            ForecastData.date_time,
+            ForecastData.day_ahead
+        ).all()
+        
+        if not forecast_data_list:
+            logger.info("No forecast data available for national Agile calculation")
+            job_status["last_national_agile"] = datetime.now()
+            job_status["last_national_agile_error"] = None
+            return
+        
+        # Convert to DataFrame with DatetimeIndex
+        df = pd.DataFrame([
+            {
+                'forecast_id': fd.forecast_id,
+                'date_time': fd.date_time,
+                'day_ahead': fd.day_ahead
+            }
+            for fd in forecast_data_list
+        ])
+        
+        # Set date_time as index and convert to Series for day_ahead_to_agile
+        df.index = pd.to_datetime(df['date_time'])
+        if df.index.tz is None:
+            df.index = df.index.tz_localize("UTC")
+        
+        # Calculate agile predictions for national region (X)
+        day_ahead_series = df["day_ahead"]
+        agile_series = day_ahead_to_agile(day_ahead_series, region="X")
+        
+        df["agile_pred"] = agile_series
+        df["region"] = "X"
+        
+        logger.info(f"Calculating national Agile data for {df['forecast_id'].nunique()} forecasts")
+        
+        # Process each forecast
+        records_added = 0
+        for forecast_id in df["forecast_id"].unique():
+            try:
+                forecast_df = df[df["forecast_id"] == forecast_id].copy()
+                
+                # Check if forecast exists
+                forecast = db.query(Forecast).filter(Forecast.id == int(forecast_id)).first()
+                if not forecast:
+                    logger.debug(f"Forecast {forecast_id} not found in database, skipping")
+                    continue
+                
+                # Add national Agile data records
+                for timestamp, row in forecast_df.iterrows():
+                    # Check if record already exists
+                    existing = db.query(AgileData).filter(
+                        AgileData.forecast_id == forecast_id,
+                        AgileData.date_time == timestamp,
+                        AgileData.region == "X"
+                    ).first()
+                    
+                    if not existing:
+                        agile_record = AgileData(
+                            forecast_id=int(forecast_id),
+                            date_time=timestamp,
+                            region="X",
+                            agile_pred=row['agile_pred'],
+                            agile_low=row['agile_pred'] * 0.95,  # Conservative bounds
+                            agile_high=row['agile_pred'] * 1.05
+                        )
+                        db.add(agile_record)
+                        records_added += 1
+                
+            except Exception as e:
+                logger.error(f"Error processing forecast {forecast_id} for national Agile: {str(e)}", exc_info=True)
+        
+        # Commit all changes
+        db.commit()
+        logger.info(f"National Agile data update completed: {records_added} records added/updated")
+        
+        job_status["last_national_agile"] = datetime.now()
+        job_status["last_national_agile_error"] = None
         
     except Exception as e:
-        logger.error("National Agile data update failed: %s", str(e))
+        logger.error("National Agile data update failed: %s", str(e), exc_info=True)
+        job_status["last_national_agile_error"] = str(e)
+        job_status["last_national_agile"] = datetime.now()
+        db.rollback()
+    finally:
+        db.close()
 
 
 def clean_old_forecasts():

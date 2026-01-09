@@ -75,17 +75,137 @@ def kde_quantiles(
     return results
 
 
+def prepare_training_data_from_history(
+    prices: pd.DataFrame,
+    current_forecast: pd.DataFrame,
+) -> Tuple[pd.DataFrame, pd.Series, pd.DataFrame, pd.Series, pd.DataFrame]:
+    """Prepare training and test data from historical price data (80/20 split).
+    
+    When no historical forecasts are available, use the price history data directly,
+    split 80% for training and 20% for testing. Uses time-based features and fills
+    forecast features from nearest available timestamp.
+    
+    Args:
+        prices: DataFrame with historical prices (indexed by datetime)
+        current_forecast: Current forecast data with features (indexed by datetime)
+        
+    Returns:
+        Tuple of (train_X, train_y, test_X, test_y, ff_train - empty DataFrame)
+    """
+    if len(prices) == 0:
+        logger.warning("No price history available for training")
+        return pd.DataFrame(), pd.Series(), pd.DataFrame(), pd.Series(), pd.DataFrame()
+    
+    # Define raw features (those available in current_forecast)
+    RAW_FEATURES = ["bm_wind", "solar", "demand", "wind_10m"]
+    
+    # Check if raw features are available in current_forecast
+    available_cols = set(current_forecast.columns)
+    required_raw_cols = set(RAW_FEATURES)
+    
+    # Create training DataFrame from prices
+    df = prices.copy()
+    
+    # Try to merge forecast features if available
+    if required_raw_cols.issubset(available_cols):
+        fd = current_forecast[RAW_FEATURES].copy()
+        
+        # Ensure both DataFrames have a consistent datetime index
+        # Reset index to make datetime a column
+        df_reset = df.reset_index()
+        fd_reset = fd.reset_index()
+        
+        # Rename the datetime column to 'datetime' if it has a different name
+        df_time_col = df_reset.columns[0] if len(df_reset.columns) > 0 else None
+        fd_time_col = fd_reset.columns[0] if len(fd_reset.columns) > 0 else None
+        
+        if df_time_col is not None and fd_time_col is not None:
+            # Rename to consistent column name
+            df_reset = df_reset.rename(columns={df_time_col: 'datetime'})
+            fd_reset = fd_reset.rename(columns={fd_time_col: 'datetime'})
+            
+            # Sort both by datetime
+            df_reset = df_reset.sort_values('datetime')
+            fd_reset = fd_reset.sort_values('datetime')
+            
+            # Use merge_asof with a very large tolerance to capture all prices
+            # then forward-fill any gaps
+            merged = pd.merge_asof(
+                df_reset,
+                fd_reset,
+                on='datetime',
+                direction='backward',
+                tolerance=pd.Timedelta('7d')  # Large tolerance to capture most data
+            )
+            
+            # Forward-fill any remaining NaN values in forecast features
+            for col in RAW_FEATURES:
+                if col in merged.columns:
+                    merged[col] = merged[col].fillna(method='ffill').fillna(method='bfill')
+            
+            # Set index back
+            merged = merged.set_index('datetime')
+            df = merged[df.columns.tolist() + [c for c in RAW_FEATURES if c in merged.columns]]
+    
+    # Drop rows with missing critical data
+    required_cols = ['day_ahead']
+    if all(col in df.columns for col in RAW_FEATURES):
+        required_cols.extend(RAW_FEATURES)
+    
+    df = df.dropna(subset=required_cols)
+    
+    if len(df) == 0:
+        logger.warning("No complete data after preparing training set")
+        return pd.DataFrame(), pd.Series(), pd.DataFrame(), pd.Series(), pd.DataFrame()
+    
+    logger.info(f"Using {len(df)} price records for training")
+    
+    # Add computed time-based features
+    df['dow'] = df.index.day_of_week
+    df['weekend'] = (df.index.day_of_week >= 5).astype(int)
+    df['time'] = df.index.hour + df.index.minute / 60
+    df['days_ago'] = 0  # All price history is historical
+    df['peak'] = ((df['time'] >= 16) & (df['time'] < 19)).astype(float)
+    
+    # Build feature list - use available features
+    feature_list = []
+    for feat in MODEL_FEATURES:
+        if feat in df.columns:
+            feature_list.append(feat)
+    
+    if len(feature_list) < 5:
+        logger.warning(f"Not enough features for training. Available: {feature_list}")
+        return pd.DataFrame(), pd.Series(), pd.DataFrame(), pd.Series(), pd.DataFrame()
+    
+    # Prepare X and y
+    X = df[feature_list]
+    y = df['day_ahead']
+    
+    # Split 80/20 for training and testing
+    train_X, test_X, train_y, test_y = train_test_split(
+        X, y, test_size=0.2, random_state=42, shuffle=True
+    )
+    
+    logger.info(f"Training data: {len(train_X)} samples, Test data: {len(test_X)} samples")
+    logger.info(f"Using features: {list(train_X.columns)}")
+    
+    # Return empty ff_train since we're not using forecasts
+    return train_X, train_y, test_X, test_y, pd.DataFrame()
+
+
 def prepare_training_data(
     db: Session,
     prices: pd.DataFrame,
+    current_forecast: pd.DataFrame = None,
     max_days: int = MAX_DAYS,
     ignore_forecast_ids: list = None
 ) -> Tuple[pd.DataFrame, pd.Series, pd.DataFrame, pd.Series, pd.DataFrame]:
-    """Prepare training and test data from historical forecasts.
+    """Prepare training and test data from historical forecasts or price history.
     
     Args:
         db: Database session
         prices: DataFrame with historical prices
+        current_forecast: Current forecast data (optional, used for initial training)
         max_days: Maximum age of forecast data to use
         ignore_forecast_ids: List of forecast IDs to exclude
         
@@ -100,9 +220,14 @@ def prepare_training_data(
         ~Forecast.id.in_(ignore_forecast_ids)
     ).order_by(Forecast.created_at.desc()).all()
     
+    # If no forecasts available, use price history data for training
     if not forecasts:
-        logger.warning("No forecasts found for training")
-        return pd.DataFrame(), pd.Series(), pd.DataFrame(), pd.Series(), pd.DataFrame()
+        logger.info("No historical forecasts found, using price history for training")
+        if current_forecast is not None and len(current_forecast) > 0:
+            return prepare_training_data_from_history(prices, current_forecast)
+        else:
+            logger.warning("No current forecast data available for training features")
+            return pd.DataFrame(), pd.Series(), pd.DataFrame(), pd.Series(), pd.DataFrame()
     
     # Get forecast data
     forecast_data_records = db.query(ForecastData).filter(
@@ -158,6 +283,10 @@ def prepare_training_data(
         fd.merge(ff, right_index=True, left_on="forecast_id")
         .set_index("date_time")
     )
+    
+    # Ensure the index is timezone-aware (convert to UTC if naive)
+    if df.index.tz is None:
+        df.index = df.index.tz_localize("UTC")
     
     # Add time-based features
     df["dow"] = df.index.day_of_week
@@ -288,8 +417,10 @@ def generate_forecast_predictions(
     # Calculate confidence intervals using KDE
     if len(test_X) > 10 and not no_ranges:
         try:
-            # Prepare data for KDE
-            results = test_X[["dt", "day_ahead"]].copy()
+            # Prepare data for KDE with time features
+            results = pd.DataFrame(index=test_X.index)
+            results["dt"] = test_X["dt"].copy() if "dt" in test_X.columns else (test_X.index - pd.Timestamp.now(tz="UTC")).total_seconds() / 86400
+            results["day_ahead"] = test_y.values
             results["pred"] = xg_model.predict(test_X[MODEL_FEATURES])
             
             kde = KernelDensity()
@@ -307,17 +438,21 @@ def generate_forecast_predictions(
                 fc["dt"].to_list(),
                 fc["day_ahead"].to_list(),
                 lim=xlim,
-                quantiles={"day_ahead_low": 0.1, "day_ahead_high": 0.9},
+                quantiles={"low": 0.1, "high": 0.9},
             )
             
             fc_quantiles = pd.DataFrame(index=fc.index, data=quantiles)
+            # Rename columns to match expected names
+            fc_quantiles = fc_quantiles.rename(columns={"low": "day_ahead_low", "high": "day_ahead_high"})
             fc = pd.concat([fc, fc_quantiles], axis=1)
             
             # Smooth the confidence intervals
             for case in ["low", "high"]:
-                fc[f"day_ahead_{case}"] = (
-                    fc[f"day_ahead_{case}"].rolling(3, center=True).mean().bfill().ffill()
-                )
+                col_name = f"day_ahead_{case}"
+                if col_name in fc.columns:
+                    fc[col_name] = (
+                        fc[col_name].rolling(3, center=True).mean().bfill().ffill()
+                    )
             
             fc["day_ahead_low"] = fc[["day_ahead", "day_ahead_low"]].min(axis=1)
             fc["day_ahead_high"] = fc[["day_ahead", "day_ahead_high"]].max(axis=1)
@@ -424,46 +559,57 @@ def save_forecast_to_db(
     Returns:
         Created Forecast object
     """
-    # Create forecast record
-    forecast = Forecast(
-        name=forecast_name,
-        mean=mean_score,
-        stdev=stdev_score,
-        created_at=pd.Timestamp.now(tz="GB")
-    )
-    db.add(forecast)
-    db.flush()  # Get the ID
-    
-    # Save forecast data
-    fc_cols = ["bm_wind", "solar", "emb_wind", "temp_2m", "wind_10m", "rad", "demand", "day_ahead"]
-    for timestamp, row in fc[fc_cols].iterrows():
-        forecast_data = ForecastData(
-            forecast_id=forecast.id,
-            date_time=timestamp,
-            day_ahead=row["day_ahead"],
-            bm_wind=row["bm_wind"],
-            solar=row["solar"],
-            emb_wind=row["emb_wind"],
-            temp_2m=row["temp_2m"],
-            wind_10m=row["wind_10m"],
-            rad=row["rad"],
-            demand=row["demand"]
+    try:
+        # Create forecast record
+        forecast = Forecast(
+            name=forecast_name,
+            mean=mean_score,
+            stdev=stdev_score,
+            created_at=pd.Timestamp.now(tz="GB")
         )
-        db.add(forecast_data)
-    
-    # Save agile data
-    for timestamp, row in ag.iterrows():
-        agile_data = AgileData(
-            forecast_id=forecast.id,
-            date_time=timestamp,
-            region=row["region"],
-            agile_pred=row["agile_pred"],
-            agile_low=row["agile_low"],
-            agile_high=row["agile_high"]
-        )
-        db.add(agile_data)
-    
-    db.commit()
-    logger.info(f"Saved forecast {forecast.id}: {forecast.name}")
-    
-    return forecast
+        db.add(forecast)
+        db.flush()  # Get the ID but don't commit yet
+        
+        # Get the ID for use in related records
+        forecast_id = forecast.id
+        
+        # Save forecast data
+        fc_cols = ["bm_wind", "solar", "emb_wind", "temp_2m", "wind_10m", "rad", "demand", "day_ahead", "day_ahead_low", "day_ahead_high"]
+        for timestamp, row in fc[fc_cols].iterrows():
+            forecast_data = ForecastData(
+                forecast_id=forecast_id,
+                date_time=timestamp,
+                day_ahead=row["day_ahead"],
+                day_ahead_low=row.get("day_ahead_low", row["day_ahead"] * 0.9),
+                day_ahead_high=row.get("day_ahead_high", row["day_ahead"] * 1.1),
+                bm_wind=row["bm_wind"],
+                solar=row["solar"],
+                emb_wind=row["emb_wind"],
+                temp_2m=row["temp_2m"],
+                wind_10m=row["wind_10m"],
+                rad=row["rad"],
+                demand=row["demand"]
+            )
+            db.add(forecast_data)
+        
+        # Save agile data
+        for timestamp, row in ag.iterrows():
+            agile_data = AgileData(
+                forecast_id=forecast_id,
+                date_time=timestamp,
+                region=row["region"],
+                agile_pred=row["agile_pred"],
+                agile_low=row["agile_low"],
+                agile_high=row["agile_high"]
+            )
+            db.add(agile_data)
+        
+        # Commit all changes together
+        db.commit()
+        logger.info(f"Saved forecast {forecast_id}: {forecast_name}")
+        
+        return forecast
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error saving forecast to database: {e}")
+        raise

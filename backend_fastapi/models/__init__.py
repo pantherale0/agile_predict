@@ -33,6 +33,8 @@ class ForecastData(Base):
     forecast_id = Column(Integer, ForeignKey("forecasting_forecasts.id"), index=True)
     date_time = Column(DateTime, index=True)
     day_ahead = Column(Float, nullable=True)
+    day_ahead_low = Column(Float, nullable=True)
+    day_ahead_high = Column(Float, nullable=True)
     bm_wind = Column(Float)
     solar = Column(Float)
     emb_wind = Column(Float)

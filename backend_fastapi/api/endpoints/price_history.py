@@ -1,7 +1,7 @@
 """Price history and generation-related API endpoints."""
 from fastapi import APIRouter, Depends, Query, Path, HTTPException
 from sqlalchemy.orm import Session
-from sqlalchemy import desc
+from sqlalchemy import desc, func
 from typing import List
 from datetime import datetime
 from core.database import get_db
@@ -9,8 +9,11 @@ from models import PriceHistory, ForecastData, Forecast
 from schemas.price import PriceHistoryResponse, GenerationDataResponse, StatsResponse
 from services.stats_service import StatsService
 import pandas as pd
+import logging
 
-router = APIRouter(prefix="/api", tags=["prices"])
+logger = logging.getLogger(__name__)
+
+router = APIRouter(prefix="/prices", tags=["prices"])
 
 
 @router.get("/price-history", response_model=List[PriceHistoryResponse])
@@ -19,15 +22,52 @@ def get_price_history(
     db: Session = Depends(get_db),
 ):
     """Get historical price data."""
-    query = db.query(PriceHistory).order_by(desc(PriceHistory.date_time))
-    
-    # Filter by date range
-    if query.first():
-        latest_date = query.first().date_time
-        start_date = latest_date - pd.Timedelta(days=days)
-        query = query.filter(PriceHistory.date_time >= start_date)
-    
-    return query.order_by(PriceHistory.date_time).all()
+    try:
+        # Get the latest date first
+        latest_date_result = db.query(func.max(PriceHistory.date_time)).scalar()
+        
+        if not latest_date_result:
+            return []
+        
+        # Calculate start date
+        start_date = latest_date_result - pd.Timedelta(days=days)
+        
+        # Query data in the date range
+        results = db.query(PriceHistory).filter(
+            PriceHistory.date_time >= start_date
+        ).order_by(PriceHistory.date_time).all()
+        
+        return results
+    except Exception as e:
+        logger.error(f"Error in get_price_history: {e}")
+        return []
+
+@router.get("/{region}/price-history", response_model=List[PriceHistoryResponse])
+def get_regional_price_history(
+    region: str = Path(...),
+    days: int = Query(14, ge=1, le=365),
+    db: Session = Depends(get_db),
+):
+    """Get historical price data."""
+    try:
+        # Get the latest date first
+        latest_date_result = db.query(func.max(PriceHistory.date_time)).scalar()
+        
+        if not latest_date_result:
+            return []
+        
+        # Calculate start date
+        start_date = latest_date_result - pd.Timedelta(days=days)
+        
+        # Query data in the date range
+        results = db.query(PriceHistory).filter(
+            PriceHistory.date_time >= start_date
+        ).order_by(PriceHistory.date_time).all()
+        
+        return results
+    except Exception as e:
+        logger.error(f"Error in get_regional_price_history: {e}")
+        return []
 
 
 @router.get("/{region}/generation", response_model=List[GenerationDataResponse])
@@ -80,7 +120,7 @@ def get_actual_price_history(
 
 @router.get("/history/heatmap/", response_model=StatsResponse)
 def get_price_heatmap(
-    days: int = Query(7, ge=1, le=30),
+    days: int = Query(365, ge=1, le=365),
     db: Session = Depends(get_db),
 ):
     """Get price heatmap data showing hourly prices across days."""
