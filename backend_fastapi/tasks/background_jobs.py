@@ -135,10 +135,26 @@ def clean_old_forecasts():
         # Clean forecasts older than 60 days
         cutoff_date = datetime.now() - timedelta(days=60)
         
-        # TODO: Implement actual forecast deletion
-        # old_forecasts = db.query(Forecast).filter(Forecast.created_at < cutoff_date).delete()
+        # Query for old forecasts before deletion to get count
+        old_forecasts_query = db.query(Forecast).filter(Forecast.created_at < cutoff_date)
+        forecasts_to_delete = old_forecasts_query.all()
+        count_to_delete = len(forecasts_to_delete)
         
-        logger.info("Forecast cleanup completed successfully")
+        if count_to_delete > 0:
+            logger.info(f"Found {count_to_delete} forecasts older than {cutoff_date}")
+            
+            # Log the forecasts that will be deleted
+            for forecast in forecasts_to_delete:
+                logger.debug(f"Deleting forecast: {forecast.name} (ID: {forecast.id}, created: {forecast.created_at})")
+            
+            # Delete old forecasts (cascade will handle related ForecastData and AgileData)
+            deleted_count = old_forecasts_query.delete(synchronize_session=False)
+            db.commit()
+            
+            logger.info(f"Forecast cleanup completed: {deleted_count} forecasts deleted")
+        else:
+            logger.info("No old forecasts found to delete")
+        
         job_status["last_clean"] = datetime.now()
         job_status["last_clean_error"] = None
         
@@ -146,6 +162,7 @@ def clean_old_forecasts():
         logger.error("Forecast cleanup failed: %s", str(e))
         job_status["last_clean_error"] = str(e)
         job_status["last_clean"] = datetime.now()
+        db.rollback()
     finally:
         db.close()
 
