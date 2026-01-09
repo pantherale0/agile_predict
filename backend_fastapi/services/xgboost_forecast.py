@@ -17,6 +17,13 @@ logger = logging.getLogger(__name__)
 # Training constants
 MAX_DAYS = 60  # Maximum age of forecast data to use in training
 MAX_TEST_X = 20000  # Maximum test samples to use
+
+# Sample weight calculation constants
+# Used to emphasize extreme values in model training
+SAMPLE_WEIGHT_OFFSET = 10  # Offset to avoid log(0)
+SAMPLE_WEIGHT_SCALE = 5    # Scale factor for log transformation
+SAMPLE_WEIGHT_SHIFT = 4    # Shift to adjust weight range
+
 MODEL_FEATURES = [
     "bm_wind",
     "solar",
@@ -185,7 +192,12 @@ def prepare_training_data(
     # Limit test set size
     if len(test_X) > MAX_TEST_X:
         # Keep a random sample of MAX_TEST_X samples
-        test_X, _, test_y, _ = train_test_split(test_X, test_y, train_size=MAX_TEST_X, random_state=42)
+        samples_to_keep = min(MAX_TEST_X, len(test_X))
+        test_X, _, test_y, _ = train_test_split(
+            test_X, test_y, 
+            train_size=samples_to_keep, 
+            random_state=42
+        )
     
     logger.info(f"Training data: {len(train_X)} samples, Test data: {len(test_X)} samples")
     
@@ -206,9 +218,12 @@ def train_xgboost_model(
         Tuple of (trained model, cross-validation scores)
     """
     # Calculate sample weights to emphasize extreme values
-    # Formula: log10(|error| + 10) * 5 - 4
+    # Formula: log10(|error| + OFFSET) * SCALE - SHIFT
     # This gives more weight to predictions that are further from the mean
-    sample_weights = ((np.log10((train_y - train_y.mean()).abs() + 10) * 5) - 4).round(0)
+    sample_weights = (
+        (np.log10((train_y - train_y.mean()).abs() + SAMPLE_WEIGHT_OFFSET) * SAMPLE_WEIGHT_SCALE) 
+        - SAMPLE_WEIGHT_SHIFT
+    ).round(0)
     
     # Initialize XGBoost model
     xg_model = xg.XGBRegressor(

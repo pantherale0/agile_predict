@@ -56,6 +56,7 @@ def update_forecasts():
     This is equivalent to: python manage.py update
     Runs the ML model to generate new forecasts based on recent data.
     """
+    db = None
     try:
         db = SessionLocal()
         logger.info("Starting forecast update task")
@@ -216,9 +217,11 @@ def update_forecasts():
         logger.error(f"Forecast update failed: {str(e)}", exc_info=True)
         job_status["last_update_error"] = str(e)
         job_status["last_update"] = datetime.now()
-        db.rollback()
+        if db is not None:
+            db.rollback()
     finally:
-        db.close()
+        if db is not None:
+            db.close()
 
 
 def update_latest_agile():
