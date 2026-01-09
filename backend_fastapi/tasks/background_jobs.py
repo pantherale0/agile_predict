@@ -135,17 +135,14 @@ def clean_old_forecasts():
         # Clean forecasts older than 60 days
         cutoff_date = datetime.now() - timedelta(days=60)
         
-        # Query for old forecasts before deletion to get count
+        # Query for old forecasts
         old_forecasts_query = db.query(Forecast).filter(Forecast.created_at < cutoff_date)
-        forecasts_to_delete = old_forecasts_query.all()
-        count_to_delete = len(forecasts_to_delete)
+        
+        # Get count without fetching all records
+        count_to_delete = old_forecasts_query.count()
         
         if count_to_delete > 0:
             logger.info(f"Found {count_to_delete} forecasts older than {cutoff_date}")
-            
-            # Log the forecasts that will be deleted
-            for forecast in forecasts_to_delete:
-                logger.debug(f"Deleting forecast: {forecast.name} (ID: {forecast.id}, created: {forecast.created_at})")
             
             # Delete old forecasts (cascade will handle related ForecastData and AgileData)
             deleted_count = old_forecasts_query.delete(synchronize_session=False)
