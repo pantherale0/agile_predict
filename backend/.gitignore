@@ -1,8 +1,9 @@
 __pycache__/
 .venv/
 .local/
-*.sqlite3*
+*.sqlite3
 *.bat
+.vscode/
 .env
 logs/
 static/

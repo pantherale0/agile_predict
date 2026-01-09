@@ -1,0 +1,44 @@
+# Caddyfile for Backend (Manchester VPS)
+# Routes API requests with caching
+
+(api_common) {
+    encode zstd gzip
+    
+    # Security headers
+    header {
+        X-Frame-Options "SAMEORIGIN"
+        X-Content-Type-Options "application/json"
+        X-XSS-Protection "1; mode=block"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        Access-Control-Allow-Origin "*"
+    }
+    
+    # Cache static API responses
+    @static path /api/stats /api/regions /api/models
+    header @static Cache-Control "public, max-age=300"
+    
+    # Don't cache dynamic endpoints
+    @dynamic path /api/forecast* /api/predict*
+    header @dynamic Cache-Control "no-cache, no-store, must-revalidate"
+}
+
+# API domain
+api.agilepredict.com {
+    import api_common
+    
+    reverse_proxy localhost:8001 {
+        # Keep connection alive
+        header_up Connection ""
+        header_up Transfer-Encoding ""
+        
+        # Preserve original host and protocol
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Forwarded-Proto {scheme}
+        header_up X-Forwarded-Host {host}
+    }
+}
+
+# Fallback for direct API access
+localhost:8000 {
+    reverse_proxy localhost:8001
+}

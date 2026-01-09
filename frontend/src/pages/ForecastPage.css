@@ -1,0 +1,76 @@
+.forecast-page {
+  min-height: 100vh;
+}
+.forecast-options {
+  border: 1px solid #495057;
+  border-radius: 0.25rem;
+  background-color: #2b2b2b;
+  overflow: hidden;
+  margin-bottom: 1rem;
+}
+
+.options-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid #495057;
+  background-color: #1a1a1a;
+  cursor: pointer;
+}
+
+.options-header h6 {
+  color: #e0e0e0;
+  font-weight: 600;
+}
+
+.options-header button {
+  color: #6c757d;
+  text-decoration: none;
+}
+
+.options-header button:hover {
+  color: #adb5bd;
+}
+
+#optionsPanel {
+  padding: 1rem;
+}
+
+.forecast-form .form-label {
+  color: #e0e0e0;
+  font-weight: 500;
+  font-size: 0.9rem;
+}
+
+.forecast-form .form-select,
+.forecast-form .form-control {
+  background-color: #495057;
+  border-color: #6c757d;
+  color: #e0e0e0;
+}
+
+.forecast-form .form-select:focus,
+.forecast-form .form-control:focus {
+  background-color: #495057;
+  border-color: #80bdff;
+  color: #e0e0e0;
+  box-shadow: 0 0 0 0.2rem rgba(13, 110, 253, 0.25);
+}
+
+.forecast-form .form-check-label {
+  color: #e0e0e0;
+  font-weight: 500;
+  margin-top: 0.25rem;
+}
+
+.forecast-form .form-text {
+  color: #adb5bd;
+  font-size: 0.85rem;
+  margin-top: 0.25rem;
+  margin-left: 1.5rem;
+}
+
+.forecast-form .btn-primary {
+  margin-top: 0.5rem;
+}

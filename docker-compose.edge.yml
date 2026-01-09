@@ -1,0 +1,55 @@
+version: '3.8'
+
+# Production Docker Compose for Edge Nodes
+# Frontend only - served by Caddy proxy
+
+services:
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: agile-predict-frontend
+    # Listen only on localhost, Caddy proxies externally
+    ports:
+      - "127.0.0.1:3000:3000"
+    environment:
+      - REACT_APP_ENV=production
+      - REACT_APP_API_URL=https://api.agilepredict.com
+    volumes:
+      - ./logs:/app/logs
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3000"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    networks:
+      - agile-predict
+
+  # Caddy reverse proxy for edge node
+  caddy:
+    image: caddy:2-alpine
+    container_name: agile-predict-caddy
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile.edge:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    environment:
+      - ACME_AGREE=true
+    depends_on:
+      - frontend
+    restart: unless-stopped
+    networks:
+      - agile-predict
+
+volumes:
+  caddy_data:
+  caddy_config:
+
+networks:
+  agile-predict:
+    driver: bridge

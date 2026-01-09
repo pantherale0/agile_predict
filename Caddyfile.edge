@@ -1,0 +1,38 @@
+# Caddyfile for Edge Nodes
+# Serves frontend with caching and compression
+
+(common) {
+    encode zstd gzip
+    
+    # Security headers
+    header {
+        X-Frame-Options "SAMEORIGIN"
+        X-Content-Type-Options "nosniff"
+        X-XSS-Protection "1; mode=block"
+        Referrer-Policy "strict-origin-when-cross-origin"
+    }
+    
+    # Caching
+    @static {
+        path /static/* /public/*
+        path *.js *.css *.png *.jpg *.jpeg *.gif *.svg *.woff *.woff2
+    }
+    
+    header @static Cache-Control "public, max-age=31536000, immutable"
+    header @dynamic Cache-Control "public, max-age=3600, must-revalidate"
+}
+
+# Main domain (adjust to your actual domain)
+agilepredict.com, www.agilepredict.com {
+    import common
+    
+    reverse_proxy localhost:3000 {
+        # Keep connection alive
+        header_up Connection ""
+        header_up Transfer-Encoding ""
+        
+        # Preserve original host
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Forwarded-Proto {scheme}
+    }
+}

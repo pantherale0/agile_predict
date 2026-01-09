@@ -1,0 +1,106 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "React Frontend",
+      "type": "chrome",
+      "request": "launch",
+      "url": "http://localhost:3000",
+      "webRoot": "${workspaceFolder}/frontend/src",
+      "sourceMapPathOverride": {
+        "/src/*": "${webRoot}/*"
+      },
+      "preLaunchTask": "Start Frontend Dev Server",
+      "postDebugTask": "Stop Frontend Dev Server",
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "name": "Django Backend",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/backend/manage.py",
+      "args": [
+        "runserver",
+        "0.0.0.0:8000"
+      ],
+      "django": true,
+      "jinja": true,
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "preLaunchTask": "Install Backend Dependencies",
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "PYTHONUNBUFFERED": "1",
+        "VIRTUAL_ENV": "${workspaceFolder}/.venv"
+      }
+    },
+    {
+      "name": "FastAPI Backend",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "uvicorn",
+      "args": [
+        "main:app",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8000",
+        "--reload"
+      ],
+      "python": "${workspaceFolder}/.venv/bin/python",
+      "cwd": "${workspaceFolder}/backend_fastapi",
+      "env": {
+        "PYTHONUNBUFFERED": "1",
+        "VIRTUAL_ENV": "${workspaceFolder}/.venv"
+      },
+      "console": "integratedTerminal",
+      "justMyCode": true
+    },
+    {
+      "name": "Frontend + Backend",
+      "type": "chrome",
+      "request": "launch",
+      "url": "http://localhost:3000",
+      "webRoot": "${workspaceFolder}/frontend/src",
+      "sourceMapPathOverride": {
+        "/src/*": "${webRoot}/*"
+      },
+      "preLaunchTask": "Start Both Servers",
+      "skipFiles": [
+        "<node_internals>/**"
+      ],
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "name": "Frontend + FastAPI Backend",
+      "type": "chrome",
+      "request": "launch",
+      "url": "http://localhost:3000",
+      "webRoot": "${workspaceFolder}/frontend/src",
+      "sourceMapPathOverride": {
+        "/src/*": "${webRoot}/*"
+      },
+      "preLaunchTask": "Start Frontend + FastAPI",
+      "skipFiles": [
+        "<node_internals>/**"
+      ],
+      "cwd": "${workspaceFolder}"
+    },  ],
+  "compounds": [
+    {
+      "name": "Full Stack Debug",
+      "configurations": [
+        "React Frontend",
+        "Django Backend"
+      ],
+      "stopAll": true
+    },
+    {
+      "name": "Full Stack (FastAPI)",
+      "configurations": [
+        "React Frontend",
+        "FastAPI Backend"
+      ],
+      "stopAll": true
+    }
+  ]
+}

@@ -1,0 +1,116 @@
+version: '3.8'
+
+services:
+  # Frontend - React app on localhost
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: agile-predict-frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - REACT_APP_ENV=development
+      - REACT_APP_API_URL=http://localhost:8000
+    volumes:
+      - ./frontend/src:/app/src
+      - ./frontend/public:/app/public
+    depends_on:
+      - backend
+    networks:
+      - agile-predict
+    restart: unless-stopped
+
+  # Backend - Django + Gunicorn
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      args:
+        PYTHON_VERSION: "3.12-slim"
+    container_name: agile-predict-backend
+    ports:
+      - "8000:8000"
+    environment:
+      - DEBUG=True
+      - DATABASE_URL=postgresql://agile:agile@postgres:5432/agile_predict
+      - REDIS_URL=redis://redis:6379/0
+      - ALLOWED_HOSTS=localhost,127.0.0.1,backend
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ./backend:/app
+      - ./logs:/app/logs
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - agile-predict
+    restart: unless-stopped
+
+  # PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: agile-predict-postgres
+    environment:
+      - POSTGRES_USER=agile
+      - POSTGRES_PASSWORD=agile
+      - POSTGRES_DB=agile_predict
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agile"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - agile-predict
+    restart: unless-stopped
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: agile-predict-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - agile-predict
+    restart: unless-stopped
+
+  # Caddy Reverse Proxy (local testing)
+  caddy:
+    image: caddy:2-alpine
+    container_name: agile-predict-caddy
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile.local:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - frontend
+      - backend
+    networks:
+      - agile-predict
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
+  caddy_data:
+  caddy_config:
+
+networks:
+  agile-predict:
+    driver: bridge

@@ -1,0 +1,63 @@
+version: '3.8'
+
+# Production Docker Compose for Backend (Manchester VPS)
+# Backend only - connects to external DB/Redis via Zerotier
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      args:
+        PYTHON_VERSION: "3.12-slim"
+    container_name: agile-predict-backend
+    # Listen only on localhost, Caddy proxies externally
+    ports:
+      - "127.0.0.1:8001:8000"
+    environment:
+      - DEBUG=False
+      - DATABASE_URL=postgresql://${DB_USER}:${DB_PASSWORD}@${DB_HOST}:5432/${DB_NAME}
+      - REDIS_URL=redis://${REDIS_HOST}:6379/0
+      - ALLOWED_HOSTS=${ALLOWED_HOSTS:-localhost,127.0.0.1,api.agilepredict.com}
+      - SECRET_KEY=${SECRET_KEY}
+      - PYTHONUNBUFFERED=1
+    volumes:
+      - ./logs:/app/logs
+      - ./static:/app/static
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/stats/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    networks:
+      - zerotier
+
+  # Caddy reverse proxy for backend
+  caddy:
+    image: caddy:2-alpine
+    container_name: agile-predict-caddy
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile.backend:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    environment:
+      - ACME_AGREE=true
+    depends_on:
+      - backend
+    restart: unless-stopped
+    networks:
+      - zerotier
+
+volumes:
+  caddy_data:
+  caddy_config:
+
+networks:
+  # Zerotier network for external connectivity
+  zerotier:
+    driver: bridge

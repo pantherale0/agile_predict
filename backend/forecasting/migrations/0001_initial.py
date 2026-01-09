@@ -1,0 +1,74 @@
+from django.db import migrations, models
+import django.db.models.deletion
+
+
+class Migration(migrations.Migration):
+
+    initial = True
+
+    dependencies = [
+    ]
+
+    operations = [
+        migrations.CreateModel(
+            name='Forecasts',
+            fields=[
+                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
+                ('name', models.CharField(max_length=64, unique=True)),
+                ('created_at', models.DateTimeField(auto_now_add=True)),
+                ('mean', models.FloatField(null=True)),
+                ('stdev', models.FloatField(null=True)),
+            ],
+        ),
+        migrations.CreateModel(
+            name='PriceHistory',
+            fields=[
+                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
+                ('date_time', models.DateTimeField(unique=True)),
+                ('day_ahead', models.FloatField()),
+                ('agile', models.FloatField()),
+            ],
+        ),
+        migrations.CreateModel(
+            name='History',
+            fields=[
+                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
+                ('date_time', models.DateTimeField(unique=True)),
+                ('total_wind', models.FloatField()),
+                ('bm_wind', models.FloatField()),
+                ('solar', models.FloatField()),
+                ('temp_2m', models.FloatField()),
+                ('wind_10m', models.FloatField()),
+                ('rad', models.FloatField()),
+                ('demand', models.FloatField()),
+            ],
+        ),
+        migrations.CreateModel(
+            name='ForecastData',
+            fields=[
+                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
+                ('date_time', models.DateTimeField()),
+                ('day_ahead', models.FloatField(null=True)),
+                ('bm_wind', models.FloatField()),
+                ('solar', models.FloatField()),
+                ('emb_wind', models.FloatField()),
+                ('temp_2m', models.FloatField()),
+                ('wind_10m', models.FloatField()),
+                ('rad', models.FloatField()),
+                ('demand', models.FloatField()),
+                ('forecast', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='data', to='forecasting.forecasts')),
+            ],
+        ),
+        migrations.CreateModel(
+            name='AgileData',
+            fields=[
+                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
+                ('region', models.CharField(max_length=1)),
+                ('agile_pred', models.FloatField()),
+                ('agile_low', models.FloatField()),
+                ('agile_high', models.FloatField()),
+                ('date_time', models.DateTimeField()),
+                ('forecast', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='prices', to='forecasting.forecasts')),
+            ],
+        ),
+    ]
