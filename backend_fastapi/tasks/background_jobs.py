@@ -173,7 +173,7 @@ def sync_local_data():
         # Import Price History
         logger.info("Importing Price History...")
         model_ph_set = set(x.date_time for x in db.query(PriceHistory.date_time).all())
-        ph = ph.drop([i for i in model_ph_set if i in ph.index])
+        ph = ph.drop([i for i in ph.index if i in model_ph_set])
         
         for index, row in ph.iterrows():
             try:
@@ -186,9 +186,6 @@ def sync_local_data():
                 stats["price_history_added"] += 1
             except Exception as e:
                 logger.error(f"Error importing price history at {index}: {str(e)}")
-        
-        db.commit()
-        logger.info(f"Price History: {stats['price_history_added']} records added")
         
         # Import Forecasts and related data
         logger.info("Importing Forecasts...")
@@ -268,6 +265,7 @@ def sync_local_data():
         
         # Commit all forecast-related changes at once
         db.commit()
+        logger.info(f"Price History: {stats['price_history_added']} records added")
         
         logger.info(f"Sync completed - Forecasts: {stats['forecasts_added']}, "
                    f"ForecastData: {stats['forecast_data_added']}, "
@@ -280,7 +278,10 @@ def sync_local_data():
         logger.error(f"Local data sync failed: {str(e)}")
         job_status["last_sync_local_error"] = str(e)
         job_status["last_sync_local"] = datetime.now()
-        db.rollback()
+        try:
+            db.rollback()
+        except Exception:
+            pass  # Ignore rollback errors if nothing to rollback
     finally:
         db.close()
 
