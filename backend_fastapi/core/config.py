@@ -61,6 +61,10 @@ class Settings(BaseSettings):
     STATS_PLOTS_DIR: Path = PLOTS_DIR / "stats_plots"
     TRENDS_DIR: Path = PLOTS_DIR / "trends"
     
+    # Local sync settings
+    LOCAL_SYNC_DIR: str = "temp"
+    LOCAL_SYNC_HDF_FILE: str = "forecast.hdf"
+    
     @field_validator("ALLOWED_HOSTS", "CORS_ORIGINS", mode="before")
     @classmethod
     def parse_comma_separated(cls, v):
