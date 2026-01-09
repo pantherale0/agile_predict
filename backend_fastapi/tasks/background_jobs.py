@@ -102,15 +102,9 @@ def update_forecasts():
         
         # Get historical prices
         prices, start = model_to_df(db, PriceHistory)
-        logger.info(f"Retrieved {len(prices)} price history records")
+        logger.info(f"Retrieved {len(prices)} price history records (start date: {start})")
         
-        if len(prices) == 0:
-            logger.warning("No historical prices available")
-            job_status["last_update"] = datetime.now()
-            job_status["last_update_error"] = None
-            return
-        
-        # Fetch new Agile prices
+        # Fetch new Agile prices (even if database is empty)
         agile = get_agile(start=start)
         day_ahead = day_ahead_to_agile(agile, reverse=True)
         
@@ -133,6 +127,13 @@ def update_forecasts():
                     logger.error(f"Error saving price at {timestamp}: {e}")
             db.commit()
             prices = pd.concat([prices, new_prices]).sort_index()
+        
+        # Check if we have any prices after fetching
+        if len(prices) == 0:
+            logger.warning("No price data available after fetching from external sources")
+            job_status["last_update"] = datetime.now()
+            job_status["last_update_error"] = "No price data available"
+            return
         
         agile_end = prices.index[-1]
         
@@ -180,19 +181,43 @@ def update_forecasts():
         # Prepare training data
         train_X, train_y, test_X, test_y, ff_train = prepare_training_data(db, prices)
         
+        # Initialize variables for model scoring
+        mean_score = 0.0
+        stdev_score = 0.0
+        
         if len(train_X) == 0:
-            logger.warning("No training data available, cannot generate forecast")
-            job_status["last_update"] = datetime.now()
-            job_status["last_update_error"] = "No training data available"
-            return
-        
-        # Train XGBoost model
-        logger.info("Training XGBoost model")
-        xg_model, scores = train_xgboost_model(train_X, train_y)
-        
-        # Generate predictions
-        logger.info("Generating forecast predictions")
-        fc = generate_forecast_predictions(xg_model, fc, prices, test_X, test_y)
+            logger.warning("No training data available, generating forecast without ML model")
+            logger.warning("First forecast will use simple day-ahead to agile conversion")
+            
+            # For the first forecast with no historical data, use a simple approach:
+            # Use the mean of recent day-ahead prices as the baseline prediction
+            if len(prices) > 0:
+                # Use recent average as baseline
+                recent_prices = prices.tail(48)  # Last 24 hours (48 half-hour periods)
+                baseline_day_ahead = recent_prices["day_ahead"].mean()
+                
+                # Add day_ahead column to fc using baseline
+                fc["day_ahead"] = baseline_day_ahead
+                fc["day_ahead_low"] = baseline_day_ahead * 0.9
+                fc["day_ahead_high"] = baseline_day_ahead * 1.1
+                
+                logger.info(f"Using baseline day-ahead price: {baseline_day_ahead:.2f}")
+            else:
+                # If no prices available, use a reasonable default
+                fc["day_ahead"] = 50.0  # £50/MWh as default
+                fc["day_ahead_low"] = 45.0
+                fc["day_ahead_high"] = 55.0
+                logger.warning("No price history available, using default baseline")
+        else:
+            # Train XGBoost model
+            logger.info("Training XGBoost model")
+            xg_model, scores = train_xgboost_model(train_X, train_y)
+            mean_score = -np.mean(scores)
+            stdev_score = np.std(scores)
+            
+            # Generate predictions
+            logger.info("Generating forecast predictions")
+            fc = generate_forecast_predictions(xg_model, fc, prices, test_X, test_y)
         
         # Create Agile predictions for all regions
         logger.info("Creating Agile price predictions for all regions")
@@ -205,8 +230,8 @@ def update_forecasts():
             new_name,
             fc,
             ag,
-            mean_score=-np.mean(scores),
-            stdev_score=np.std(scores)
+            mean_score=mean_score,
+            stdev_score=stdev_score
         )
         
         logger.info(f"Forecast update completed successfully: {forecast.id} - {forecast.name}")
