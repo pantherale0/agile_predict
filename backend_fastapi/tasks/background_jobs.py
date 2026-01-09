@@ -17,7 +17,24 @@ from models import History, Forecast, PriceHistory, ForecastData, AgileData
 logger = logging.getLogger(__name__)
 
 # Constants
-AGILE_REGIONS = ["G", "X"]
+# UK Agile pricing regions mapping
+AGILE_REGIONS = {
+    'X': 'National Average',
+    'A': 'Eastern England',
+    'B': 'East Midlands',
+    'C': 'London',
+    'D': 'Merseyside and Northern Wales',
+    'E': 'West Midlands',
+    'F': 'North Eastern England',
+    'G': 'North Western England',
+    'H': 'Southern England',
+    'J': 'South Eastern England',
+    'K': 'Southern Wales',
+    'L': 'South Western England',
+    'M': 'Yorkshire',
+    'N': 'Southern Scotland',
+    'P': 'Northern Scotland'
+}
 
 # Job status tracking
 job_status = {
@@ -243,7 +260,7 @@ def _import_agile_data(
         return 0
     
     for timestamp, row in related_agile_df.iterrows():
-        for region in AGILE_REGIONS:
+        for region in AGILE_REGIONS.keys():
             try:
                 existing_record = db.query(AgileData).filter(
                     AgileData.forecast_id == forecast.id,
