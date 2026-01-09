@@ -35,7 +35,7 @@ Agile Predict is a Django-based web application that forecasts Octopus Agile ele
    ```
 
 2. Activate the virtual environment:
-   - Windows: `./.venv/Scripts/activate`
+   - Windows: `.venv\Scripts\activate` (or `.venv\Scripts\activate.bat`)
    - Unix/macOS: `source .venv/bin/activate`
 
 3. Install dependencies:
