@@ -172,8 +172,8 @@ def sync_local_data():
         
         # Import Price History
         logger.info("Importing Price History...")
-        model_ph = [x.date_time for x in db.query(PriceHistory.date_time).all()]
-        ph = ph.drop([i for i in model_ph if i in ph.index])
+        model_ph_set = set(x.date_time for x in db.query(PriceHistory.date_time).all())
+        ph = ph.drop([i for i in model_ph_set if i in ph.index])
         
         for index, row in ph.iterrows():
             try:
@@ -206,10 +206,11 @@ def sync_local_data():
                     db.flush()  # Get the ID
                     stats["forecasts_added"] += 1
                 
-                forecast_id = row["id"]
+                # Use the HDF file's forecast_id to find related data
+                hdf_forecast_id = row["id"]
                 
                 # Import ForecastData for this forecast
-                df = fd[fd["forecast_id"] == forecast_id].set_index("date_time")
+                df = fd[fd["forecast_id"] == hdf_forecast_id].set_index("date_time")
                 for fd_index, fd_row in df.iterrows():
                     try:
                         existing_fd = db.query(ForecastData).filter(
@@ -236,7 +237,7 @@ def sync_local_data():
                         logger.error(f"Error importing forecast data for {index} at {fd_index}: {str(e)}")
                 
                 # Import AgileData for this forecast
-                agile_df = ad[ad["forecast_id"] == forecast_id].set_index("date_time")
+                agile_df = ad[ad["forecast_id"] == hdf_forecast_id].set_index("date_time")
                 if len(agile_df) > 0:
                     for ad_index, ad_row in agile_df.iterrows():
                         # Import for all configured regions
@@ -264,7 +265,6 @@ def sync_local_data():
                 
             except Exception as e:
                 logger.error(f"Error processing forecast {index}: {str(e)}")
-                db.rollback()
         
         # Commit all forecast-related changes at once
         db.commit()
