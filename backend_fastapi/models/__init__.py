@@ -1,5 +1,5 @@
 """SQLAlchemy models for the application."""
-from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, UniqueConstraint
+from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, UniqueConstraint, Text, Boolean
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 from datetime import datetime
@@ -84,3 +84,21 @@ class History(Base):
     wind_10m = Column(Float)
     rad = Column(Float)
     demand = Column(Float)
+
+
+class TaskLog(Base):
+    """Task execution log model - tracks background job executions."""
+    __tablename__ = "task_logs"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    job_id = Column(String(128), index=True)
+    job_name = Column(String(255), index=True)
+    started_at = Column(DateTime, index=True)
+    completed_at = Column(DateTime, nullable=True, index=True)
+    status = Column(String(20), default="running", index=True)  # running, success, failed
+    duration_seconds = Column(Float, nullable=True)
+    error_message = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    
+    def __str__(self) -> str:
+        return f"{self.job_name} - {self.started_at}"

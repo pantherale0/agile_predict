@@ -459,6 +459,10 @@ def model_to_df(db: Session, model_class) -> Tuple[pd.DataFrame, pd.Timestamp]:
     
     df.index = pd.to_datetime(df["date_time"])
     df = df.sort_index()
+    # Localize as UTC first (data is stored as UTC-naive in DB but represents UTC times)
+    # then convert to GB timezone
+    if df.index.tz is None:
+        df.index = df.index.tz_localize("UTC")
     df.index = df.index.tz_convert("GB")
     df.drop(["date_time"], axis=1, inplace=True, errors='ignore')
     

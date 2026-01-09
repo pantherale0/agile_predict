@@ -13,9 +13,36 @@ from core.database import SessionLocal
 from core.config import settings
 from services.forecast_service import ForecastService
 from services.price_service import PriceService
-from models import History, Forecast, PriceHistory, ForecastData, AgileData
+from models import History, Forecast, PriceHistory, ForecastData, AgileData, TaskLog
 
 logger = logging.getLogger(__name__)
+
+
+def log_task_execution(job_id: str, job_name: str, status: str, error_message: str = None, duration_seconds: float = None):
+    """Log task execution to the database.
+    
+    Args:
+        job_id: Unique job identifier
+        job_name: Human-readable job name
+        status: Job status (success, failed, running)
+        error_message: Error message if job failed
+        duration_seconds: Execution duration in seconds
+    """
+    try:
+        db = SessionLocal()
+        task_log = TaskLog(
+            job_id=job_id,
+            job_name=job_name,
+            started_at=datetime.utcnow(),
+            status=status,
+            error_message=error_message,
+            duration_seconds=duration_seconds
+        )
+        db.add(task_log)
+        db.commit()
+        db.close()
+    except Exception as e:
+        logger.error(f"Failed to log task execution: {e}")
 
 # Constants
 # UK Agile pricing regions mapping
@@ -115,17 +142,49 @@ def update_forecasts():
         # Save new prices to database
         if len(new_prices) > 0:
             logger.info(f"Adding {len(new_prices)} new price records")
-            for timestamp, row in new_prices.iterrows():
-                try:
-                    price_record = PriceHistory(
-                        date_time=timestamp,
-                        day_ahead=row["day_ahead"],
-                        agile=row["agile"]
-                    )
-                    db.add(price_record)
-                except Exception as e:
-                    logger.error(f"Error saving price at {timestamp}: {e}")
-            db.commit()
+            
+            # Remove duplicates within new_prices itself (keep first occurrence)
+            new_prices_sorted = new_prices.sort_index()
+            new_prices_deduped = new_prices_sorted[~new_prices_sorted.index.duplicated(keep='first')]
+            duplicates_removed = len(new_prices) - len(new_prices_deduped)
+            if duplicates_removed > 0:
+                logger.info(f"Removed {duplicates_removed} duplicate timestamps from data source")
+            
+            # Convert timezone-aware index to UTC (handles DST transitions correctly)
+            # The index should be Europe/London timezone-aware
+            if new_prices_deduped.index.tz is not None:
+                # Convert to UTC to properly distinguish DST transition duplicates
+                utc_index = new_prices_deduped.index.tz_convert('UTC')
+                new_prices_deduped.index = utc_index
+                logger.info("Converted Europe/London timezone data to UTC")
+            
+            # Add records in batches
+            if len(new_prices_deduped) > 0:
+                batch_size = 500
+                total_added = 0
+                
+                for i in range(0, len(new_prices_deduped), batch_size):
+                    batch = new_prices_deduped.iloc[i:i+batch_size]
+                    
+                    try:
+                        for timestamp, row in batch.iterrows():
+                            price_record = PriceHistory(
+                                date_time=timestamp,
+                                day_ahead=row['day_ahead'],
+                                agile=row['agile']
+                            )
+                            db.add(price_record)
+                        
+                        db.commit()
+                        total_added += len(batch)
+                        logger.info(f"Batch {i//batch_size + 1}: Added {len(batch)} records ({total_added} total)")
+                    except Exception as e:
+                        logger.error(f"Error in batch {i//batch_size + 1}: {e}")
+                        db.rollback()
+                        raise
+                
+                logger.info(f"Successfully added {total_added} price records (stored as UTC to preserve DST transitions)")
+            
             prices = pd.concat([prices, new_prices]).sort_index()
         
         # Check if we have any prices after fetching

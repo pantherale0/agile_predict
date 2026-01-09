@@ -18,9 +18,13 @@ def setup_admin(app: FastAPI):
     """
     # Import here to avoid circular imports
     from starlette_admin.contrib.sqla import Admin
+    from admin.custom_views import SchedulerInfoView
     
     # Create admin instance
     admin = Admin(engine=engine, title="AgilePredictAPI Admin")
+    
+    # Register custom views (non-model views)
+    admin.add_view(SchedulerInfoView())
     
     # Mount admin app
     admin.mount_to(app)
