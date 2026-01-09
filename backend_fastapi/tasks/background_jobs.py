@@ -7,6 +7,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 import pandas as pd
+import numpy as np
 
 from core.database import SessionLocal
 from core.config import settings
@@ -55,26 +56,165 @@ def update_forecasts():
     This is equivalent to: python manage.py update
     Runs the ML model to generate new forecasts based on recent data.
     """
+    db = SessionLocal()
     try:
-        db = SessionLocal()
         logger.info("Starting forecast update task")
         
-        # Get latest historical data
+        # Import required modules
+        from services.data_utils import model_to_df, get_latest_forecast, get_agile, day_ahead_to_agile, get_gb60
+        from services.xgboost_forecast import (
+            prepare_training_data,
+            train_xgboost_model,
+            generate_forecast_predictions,
+            create_agile_predictions,
+            save_forecast_to_db
+        )
+        
+        # Get latest historical data counts
         history_count = db.query(History).count()
         forecast_count = db.query(Forecast).count()
+        logger.info(f"Current database state: {history_count} history records, {forecast_count} forecasts")
         
-        logger.info("Forecast update: %s history records, %s forecasts", history_count, forecast_count)
+        # Clean up old/invalid forecasts
+        MIN_FORECAST_DATA = 600
+        forecasts_to_keep = []
         
-        # TODO: Implement actual forecast generation using XGBoost model
-        # For now, just log the operation
-        logger.info("Forecast update completed successfully")
+        for f in db.query(Forecast).order_by(Forecast.created_at.desc()).all():
+            fd_count = db.query(ForecastData).filter(ForecastData.forecast_id == f.id).count()
+            if fd_count >= MIN_FORECAST_DATA:
+                dt = pd.to_datetime(f.name).tz_localize("GB")
+                days = (pd.Timestamp.now(tz="GB") - dt).days
+                
+                # Keep forecasts from specific hours within 120 days
+                if days < 120:
+                    for hour in [6, 10, 11, 16, 22]:
+                        if f"{hour:02d}:15" in f.name:
+                            forecasts_to_keep.append(f.id)
+                            break
+        
+        # Delete forecasts not in the keep list
+        db.query(Forecast).filter(~Forecast.id.in_(forecasts_to_keep)).delete(synchronize_session=False)
+        db.commit()
+        logger.info(f"Cleaned up forecasts, keeping {len(forecasts_to_keep)}")
+        
+        # Get historical prices
+        prices, start = model_to_df(db, PriceHistory)
+        logger.info(f"Retrieved {len(prices)} price history records")
+        
+        if len(prices) == 0:
+            logger.warning("No historical prices available")
+            job_status["last_update"] = datetime.now()
+            job_status["last_update_error"] = None
+            return
+        
+        # Fetch new Agile prices
+        agile = get_agile(start=start)
+        day_ahead = day_ahead_to_agile(agile, reverse=True)
+        
+        new_prices = pd.concat([day_ahead, agile], axis=1)
+        if len(prices) > 0:
+            new_prices = new_prices[new_prices.index > prices.index[-1]]
+        
+        # Save new prices to database
+        if len(new_prices) > 0:
+            logger.info(f"Adding {len(new_prices)} new price records")
+            for timestamp, row in new_prices.iterrows():
+                try:
+                    price_record = PriceHistory(
+                        date_time=timestamp,
+                        day_ahead=row["day_ahead"],
+                        agile=row["agile"]
+                    )
+                    db.add(price_record)
+                except Exception as e:
+                    logger.error(f"Error saving price at {timestamp}: {e}")
+            db.commit()
+            prices = pd.concat([prices, new_prices]).sort_index()
+        
+        agile_end = prices.index[-1]
+        
+        # Get GB60 future prices
+        gb60 = get_gb60()
+        if len(gb60) > 0:
+            gb60 = gb60.resample("30min").ffill().loc[agile_end + pd.Timedelta("30min"):]
+            if len(gb60) > 0:
+                gb60 = gb60.reindex(
+                    pd.date_range(gb60.index[0], gb60.index[-1] + pd.Timedelta("30min"), freq="30min")
+                ).ffill()
+                gb60 = pd.concat([gb60, day_ahead_to_agile(gb60)], axis=1).set_axis(["day_ahead", "agile"], axis=1)
+                prices = pd.concat([prices, gb60]).sort_index()
+                logger.info(f"Added {len(gb60)} GB60 future prices")
+        
+        # Generate new forecast name
+        new_name = pd.Timestamp.now(tz="GB").strftime("%Y-%m-%d %H:%M")
+        
+        # Check if forecast already exists
+        existing = db.query(Forecast).filter(Forecast.name == new_name).first()
+        if existing:
+            logger.info(f"Forecast {new_name} already exists, skipping")
+            job_status["last_update"] = datetime.now()
+            job_status["last_update_error"] = None
+            return
+        
+        # Get latest forecast data from external APIs
+        logger.info("Fetching latest forecast data from external APIs")
+        fc, missing_fc = get_latest_forecast()
+        
+        if len(missing_fc) > 0:
+            logger.error(f"Unable to run forecast due to missing columns: {', '.join(missing_fc)}")
+            job_status["last_update"] = datetime.now()
+            job_status["last_update_error"] = f"Missing forecast data: {', '.join(missing_fc)}"
+            return
+        
+        if len(fc) == 0:
+            logger.error("No forecast data available")
+            job_status["last_update"] = datetime.now()
+            job_status["last_update_error"] = "No forecast data available"
+            return
+        
+        logger.info(f"Retrieved forecast data from {fc.index[0]} to {fc.index[-1]}")
+        
+        # Prepare training data
+        train_X, train_y, test_X, test_y, ff_train = prepare_training_data(db, prices)
+        
+        if len(train_X) == 0:
+            logger.warning("No training data available, cannot generate forecast")
+            job_status["last_update"] = datetime.now()
+            job_status["last_update_error"] = "No training data available"
+            return
+        
+        # Train XGBoost model
+        logger.info("Training XGBoost model")
+        xg_model, scores = train_xgboost_model(train_X, train_y)
+        
+        # Generate predictions
+        logger.info("Generating forecast predictions")
+        fc = generate_forecast_predictions(xg_model, fc, prices, test_X, test_y)
+        
+        # Create Agile predictions for all regions
+        logger.info("Creating Agile price predictions for all regions")
+        ag = create_agile_predictions(fc)
+        
+        # Save forecast to database
+        logger.info("Saving forecast to database")
+        forecast = save_forecast_to_db(
+            db,
+            new_name,
+            fc,
+            ag,
+            mean_score=-np.mean(scores),
+            stdev_score=np.std(scores)
+        )
+        
+        logger.info(f"Forecast update completed successfully: {forecast.id} - {forecast.name}")
         job_status["last_update"] = datetime.now()
         job_status["last_update_error"] = None
         
     except Exception as e:
-        logger.error("Forecast update failed: %s", str(e))
+        logger.error(f"Forecast update failed: {str(e)}", exc_info=True)
         job_status["last_update_error"] = str(e)
         job_status["last_update"] = datetime.now()
+        db.rollback()
     finally:
         db.close()
 
