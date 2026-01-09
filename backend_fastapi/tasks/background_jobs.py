@@ -1,15 +1,18 @@
 """Background task definitions for scheduled jobs."""
 import logging
+import os
 from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
+import pandas as pd
 
 from core.database import SessionLocal
+from core.config import settings
 from services.forecast_service import ForecastService
 from services.price_service import PriceService
-from models import History, Forecast, PriceHistory
+from models import History, Forecast, PriceHistory, ForecastData, AgileData
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +24,8 @@ job_status = {
     "last_latest_agile_error": None,
     "last_clean": None,
     "last_clean_error": None,
+    "last_sync_local": None,
+    "last_sync_local_error": None,
 }
 
 
@@ -129,16 +134,154 @@ def sync_local_data():
     """Sync local data sources.
     
     This is equivalent to: python manage.py sync_local
-    Synchronizes data with local sources.
+    Synchronizes data with local sources by reading from HDF5 file
+    and importing forecast data into the database.
     """
+    db = SessionLocal()
     try:
         logger.info("Starting local data sync task")
         
-        # TODO: Implement actual local sync logic
-        logger.info("Local data sync completed successfully")
+        # Construct path to HDF file
+        local_dir = os.path.join(os.getcwd(), settings.LOCAL_SYNC_DIR)
+        hdf_path = os.path.join(local_dir, settings.LOCAL_SYNC_HDF_FILE)
+        
+        if not os.path.exists(hdf_path):
+            logger.warning(f"HDF file not found at {hdf_path}. Skipping sync.")
+            job_status["last_sync_local"] = datetime.now()
+            job_status["last_sync_local_error"] = None
+            return
+        
+        logger.info(f"Reading HDF file from {hdf_path}")
+        
+        # Read data from HDF file
+        ff = pd.read_hdf(hdf_path, key="Forecasts").set_index("name").sort_index()
+        fd = pd.read_hdf(hdf_path, key="ForecastData")
+        ph = pd.read_hdf(hdf_path, key="PriceHistory").set_index("date_time").sort_index()[["day_ahead", "agile"]]
+        ad = pd.read_hdf(hdf_path, key="AgileData")
+        
+        # Track statistics
+        stats = {
+            "price_history_added": 0,
+            "forecasts_added": 0,
+            "forecast_data_added": 0,
+            "agile_data_added": 0,
+        }
+        
+        # Import Price History
+        logger.info("Importing Price History...")
+        model_ph = [x.date_time for x in db.query(PriceHistory.date_time).all()]
+        ph = ph.drop([i for i in model_ph if i in ph.index])
+        
+        for index, row in ph.iterrows():
+            try:
+                existing = db.query(PriceHistory).filter(PriceHistory.date_time == index).first()
+                if not existing:
+                    new_ph = PriceHistory(
+                        date_time=index,
+                        day_ahead=row["day_ahead"],
+                        agile=row["agile"]
+                    )
+                    db.add(new_ph)
+                    stats["price_history_added"] += 1
+            except Exception as e:
+                logger.error(f"Error importing price history at {index}: {str(e)}")
+        
+        db.commit()
+        logger.info(f"Price History: {stats['price_history_added']} records added")
+        
+        # Import Forecasts and related data
+        logger.info("Importing Forecasts...")
+        model_ff = [x.name for x in db.query(Forecast.name).all()]
+        
+        for index, row in ff.iterrows():
+            try:
+                # Get or create Forecast
+                ff_obj = db.query(Forecast).filter(Forecast.name == index).first()
+                if not ff_obj:
+                    ff_obj = Forecast(
+                        name=index,
+                        created_at=row["created_at"]
+                    )
+                    db.add(ff_obj)
+                    db.flush()  # Get the ID
+                    stats["forecasts_added"] += 1
+                
+                forecast_id = row["id"]
+                
+                # Import ForecastData for this forecast
+                df = fd[fd["forecast_id"] == forecast_id].set_index("date_time")
+                for fd_index, fd_row in df.iterrows():
+                    try:
+                        existing_fd = db.query(ForecastData).filter(
+                            ForecastData.forecast_id == ff_obj.id,
+                            ForecastData.date_time == fd_index
+                        ).first()
+                        
+                        if not existing_fd:
+                            new_fd = ForecastData(
+                                forecast_id=ff_obj.id,
+                                date_time=fd_index,
+                                day_ahead=fd_row.get("day_ahead"),
+                                bm_wind=fd_row.get("bm_wind"),
+                                solar=fd_row.get("solar"),
+                                emb_wind=fd_row.get("emb_wind"),
+                                temp_2m=fd_row.get("temp_2m"),
+                                wind_10m=fd_row.get("wind_10m"),
+                                rad=fd_row.get("rad"),
+                                demand=fd_row.get("demand")
+                            )
+                            db.add(new_fd)
+                            stats["forecast_data_added"] += 1
+                    except Exception as e:
+                        logger.error(f"Error importing forecast data for {index} at {fd_index}: {str(e)}")
+                
+                # Import AgileData for this forecast
+                agile_df = ad[ad["forecast_id"] == forecast_id].set_index("date_time")
+                if len(agile_df) > 0:
+                    for ad_index, ad_row in agile_df.iterrows():
+                        # Import for both regions (G and X)
+                        for region in ["G", "X"]:
+                            try:
+                                existing_ad = db.query(AgileData).filter(
+                                    AgileData.forecast_id == ff_obj.id,
+                                    AgileData.date_time == ad_index,
+                                    AgileData.region == region
+                                ).first()
+                                
+                                if not existing_ad:
+                                    new_ad = AgileData(
+                                        forecast_id=ff_obj.id,
+                                        date_time=ad_index,
+                                        region=region,
+                                        agile_pred=ad_row.get("agile_pred"),
+                                        agile_low=ad_row.get("agile_low"),
+                                        agile_high=ad_row.get("agile_high")
+                                    )
+                                    db.add(new_ad)
+                                    stats["agile_data_added"] += 1
+                            except Exception as e:
+                                logger.error(f"Error importing agile data for {index} at {ad_index}, region {region}: {str(e)}")
+                
+                db.commit()
+                
+            except Exception as e:
+                logger.error(f"Error processing forecast {index}: {str(e)}")
+                db.rollback()
+        
+        logger.info(f"Sync completed - Forecasts: {stats['forecasts_added']}, "
+                   f"ForecastData: {stats['forecast_data_added']}, "
+                   f"AgileData: {stats['agile_data_added']}")
+        
+        job_status["last_sync_local"] = datetime.now()
+        job_status["last_sync_local_error"] = None
         
     except Exception as e:
-        logger.error("Local data sync failed: %s", str(e))
+        logger.error(f"Local data sync failed: {str(e)}")
+        job_status["last_sync_local_error"] = str(e)
+        job_status["last_sync_local"] = datetime.now()
+        db.rollback()
+    finally:
+        db.close()
 
 
 def configure_scheduled_jobs(scheduler: BackgroundScheduler):
