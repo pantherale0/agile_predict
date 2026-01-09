@@ -176,10 +176,7 @@ class DataSet:
 
 
 def get_gb60() -> pd.Series:
-    """Fetch GB60 day-ahead prices from Nord Pool public data page.
-    
-    Scrapes the public data from the Nord Pool website instead of using
-    the API which requires authentication.
+    """Fetch GB60 day-ahead prices from Nord Pool API.
     
     Returns:
         Series with day-ahead prices indexed by datetime
@@ -187,12 +184,12 @@ def get_gb60() -> pd.Series:
     # Calculate delivery date (typically tomorrow)
     delivery_date = (pd.Timestamp.now() + pd.Timedelta("13h")).strftime("%Y-%m-%d")
     
-    url = "https://data.nordpoolgroup.com/auction/gb-half-hour/prices"
+    url = "https://dataportal-api.nordpoolgroup.com/api/DayAheadPrices"
     params = {
-        "deliveryDate": delivery_date,
+        "date": delivery_date,
+        "market": "GbHalfHour_DayAhead",
+        "deliveryArea": "UK",
         "currency": "GBP",
-        "aggregation": "DeliveryPeriod",
-        "deliveryAreas": "UK",
     }
     
     try:
@@ -205,23 +202,15 @@ def get_gb60() -> pd.Series:
     try:
         data = r.json()
         
-        # Parse the response structure
-        # Expected structure: list of price entries with delivery time and price
-        if isinstance(data, list):
-            prices = {}
-            for entry in data:
-                # Try different possible field names for delivery time and price
-                delivery_time = entry.get("deliveryStart") or entry.get("deliveryPeriodStart") or entry.get("startTime")
-                price_value = entry.get("price") or entry.get("value")
-                
-                if delivery_time and price_value is not None:
-                    timestamp = pd.Timestamp(delivery_time).tz_convert("GB")
-                    prices[timestamp] = float(price_value)
-            
-            if prices:
-                return pd.Series(prices).sort_index()
+        # Parse the response structure - expecting multiAreaEntries
+        if "multiAreaEntries" in data:
+            price = pd.Series({
+                pd.Timestamp(row["deliveryStart"]).tz_convert("GB"): float(row["entryPerArea"]["UK"])
+                for row in data["multiAreaEntries"]
+            })
+            return price
         
-        # If we get here, the structure wasn't as expected
+        # If structure is different, log and return empty
         logger.warning(f"Unexpected GB60 data structure: {data}")
         return pd.Series([], dtype=float, index=pd.DatetimeIndex([]))
         
