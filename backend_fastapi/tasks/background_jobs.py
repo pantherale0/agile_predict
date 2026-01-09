@@ -7,14 +7,42 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 import pandas as pd
+import numpy as np
 
 from core.database import SessionLocal
 from core.config import settings
 from services.forecast_service import ForecastService
 from services.price_service import PriceService
-from models import History, Forecast, PriceHistory, ForecastData, AgileData
+from models import History, Forecast, PriceHistory, ForecastData, AgileData, TaskLog
 
 logger = logging.getLogger(__name__)
+
+
+def log_task_execution(job_id: str, job_name: str, status: str, error_message: str = None, duration_seconds: float = None):
+    """Log task execution to the database.
+    
+    Args:
+        job_id: Unique job identifier
+        job_name: Human-readable job name
+        status: Job status (success, failed, running)
+        error_message: Error message if job failed
+        duration_seconds: Execution duration in seconds
+    """
+    try:
+        db = SessionLocal()
+        task_log = TaskLog(
+            job_id=job_id,
+            job_name=job_name,
+            started_at=datetime.utcnow(),
+            status=status,
+            error_message=error_message,
+            duration_seconds=duration_seconds
+        )
+        db.add(task_log)
+        db.commit()
+        db.close()
+    except Exception as e:
+        logger.error(f"Failed to log task execution: {e}")
 
 # Constants
 # UK Agile pricing regions mapping
@@ -55,28 +83,229 @@ def update_forecasts():
     This is equivalent to: python manage.py update
     Runs the ML model to generate new forecasts based on recent data.
     """
+    db = None
     try:
         db = SessionLocal()
         logger.info("Starting forecast update task")
         
-        # Get latest historical data
+        # Import required modules
+        from services.data_utils import model_to_df, get_latest_forecast, get_agile, day_ahead_to_agile, get_gb60
+        from services.xgboost_forecast import (
+            prepare_training_data,
+            train_xgboost_model,
+            generate_forecast_predictions,
+            create_agile_predictions,
+            save_forecast_to_db
+        )
+        
+        # Get latest historical data counts
         history_count = db.query(History).count()
         forecast_count = db.query(Forecast).count()
+        logger.info(f"Current database state: {history_count} history records, {forecast_count} forecasts")
         
-        logger.info("Forecast update: %s history records, %s forecasts", history_count, forecast_count)
+        # Clean up old/invalid forecasts
+        MIN_FORECAST_DATA = 600
+        forecasts_to_keep = []
         
-        # TODO: Implement actual forecast generation using XGBoost model
-        # For now, just log the operation
-        logger.info("Forecast update completed successfully")
+        for f in db.query(Forecast).order_by(Forecast.created_at.desc()).all():
+            fd_count = db.query(ForecastData).filter(ForecastData.forecast_id == f.id).count()
+            if fd_count >= MIN_FORECAST_DATA:
+                dt = pd.to_datetime(f.name).tz_localize("GB")
+                days = (pd.Timestamp.now(tz="GB") - dt).days
+                
+                # Keep forecasts from specific hours within 120 days
+                if days < 120:
+                    for hour in [6, 10, 11, 16, 22]:
+                        if f"{hour:02d}:15" in f.name:
+                            forecasts_to_keep.append(f.id)
+                            break
+        
+        # Delete forecasts not in the keep list
+        forecasts_to_delete = db.query(Forecast).filter(~Forecast.id.in_(forecasts_to_keep)).all()
+        for forecast in forecasts_to_delete:
+            db.delete(forecast)
+        db.commit()
+        logger.info(f"Cleaned up forecasts, keeping {len(forecasts_to_keep)}")
+        
+        # Get historical prices
+        prices, start = model_to_df(db, PriceHistory)
+        logger.info(f"Retrieved {len(prices)} price history records (start date: {start})")
+        
+        # Fetch new Agile prices (even if database is empty)
+        agile = get_agile(start=start)
+        day_ahead = day_ahead_to_agile(agile, reverse=True)
+        
+        new_prices = pd.concat([day_ahead, agile], axis=1)
+        if len(prices) > 0:
+            new_prices = new_prices[new_prices.index > prices.index[-1]]
+        
+        # Save new prices to database
+        if len(new_prices) > 0:
+            logger.info(f"Adding {len(new_prices)} new price records")
+            
+            # Remove duplicates within new_prices itself (keep first occurrence)
+            new_prices_sorted = new_prices.sort_index()
+            new_prices_deduped = new_prices_sorted[~new_prices_sorted.index.duplicated(keep='first')]
+            duplicates_removed = len(new_prices) - len(new_prices_deduped)
+            if duplicates_removed > 0:
+                logger.info(f"Removed {duplicates_removed} duplicate timestamps from data source")
+            
+            # Convert timezone-aware index to UTC (handles DST transitions correctly)
+            # The index should be Europe/London timezone-aware
+            if new_prices_deduped.index.tz is not None:
+                # Convert to UTC to properly distinguish DST transition duplicates
+                utc_index = new_prices_deduped.index.tz_convert('UTC')
+                new_prices_deduped.index = utc_index
+                logger.info("Converted Europe/London timezone data to UTC")
+            
+            # Add records in batches
+            if len(new_prices_deduped) > 0:
+                batch_size = 500
+                total_added = 0
+                
+                for i in range(0, len(new_prices_deduped), batch_size):
+                    batch = new_prices_deduped.iloc[i:i+batch_size]
+                    
+                    try:
+                        for timestamp, row in batch.iterrows():
+                            price_record = PriceHistory(
+                                date_time=timestamp,
+                                day_ahead=row['day_ahead'],
+                                agile=row['agile']
+                            )
+                            db.add(price_record)
+                        
+                        db.commit()
+                        total_added += len(batch)
+                        logger.info(f"Batch {i//batch_size + 1}: Added {len(batch)} records ({total_added} total)")
+                    except Exception as e:
+                        logger.error(f"Error in batch {i//batch_size + 1}: {e}")
+                        db.rollback()
+                        raise
+                
+                logger.info(f"Successfully added {total_added} price records (stored as UTC to preserve DST transitions)")
+            
+            prices = pd.concat([prices, new_prices]).sort_index()
+        
+        # Check if we have any prices after fetching
+        if len(prices) == 0:
+            logger.warning("No price data available after fetching from external sources")
+            job_status["last_update"] = datetime.now()
+            job_status["last_update_error"] = "No price data available"
+            return
+        
+        agile_end = prices.index[-1]
+        
+        # Get GB60 future prices
+        gb60 = get_gb60()
+        if len(gb60) > 0:
+            gb60 = gb60.resample("30min").ffill().loc[agile_end + pd.Timedelta("30min"):]
+            if len(gb60) > 0:
+                gb60 = gb60.reindex(
+                    pd.date_range(gb60.index[0], gb60.index[-1] + pd.Timedelta("30min"), freq="30min")
+                ).ffill()
+                gb60 = pd.concat([gb60, day_ahead_to_agile(gb60)], axis=1).set_axis(["day_ahead", "agile"], axis=1)
+                prices = pd.concat([prices, gb60]).sort_index()
+                logger.info(f"Added {len(gb60)} GB60 future prices")
+        
+        # Generate new forecast name
+        new_name = pd.Timestamp.now(tz="GB").strftime("%Y-%m-%d %H:%M")
+        
+        # Check if forecast already exists
+        existing = db.query(Forecast).filter(Forecast.name == new_name).first()
+        if existing:
+            logger.info(f"Forecast {new_name} already exists, skipping")
+            job_status["last_update"] = datetime.now()
+            job_status["last_update_error"] = None
+            return
+        
+        # Get latest forecast data from external APIs
+        logger.info("Fetching latest forecast data from external APIs")
+        fc, missing_fc = get_latest_forecast()
+        
+        if len(missing_fc) > 0:
+            logger.error(f"Unable to run forecast due to missing columns: {', '.join(missing_fc)}")
+            job_status["last_update"] = datetime.now()
+            job_status["last_update_error"] = f"Missing forecast data: {', '.join(missing_fc)}"
+            return
+        
+        if len(fc) == 0:
+            logger.error("No forecast data available")
+            job_status["last_update"] = datetime.now()
+            job_status["last_update_error"] = "No forecast data available"
+            return
+        
+        logger.info(f"Retrieved forecast data from {fc.index[0]} to {fc.index[-1]}")
+        
+        # Prepare training data
+        train_X, train_y, test_X, test_y, ff_train = prepare_training_data(db, prices)
+        
+        # Initialize variables for model scoring
+        mean_score = 0.0
+        stdev_score = 0.0
+        
+        if len(train_X) == 0:
+            logger.warning("No training data available, generating forecast without ML model")
+            logger.warning("First forecast will use simple day-ahead to agile conversion")
+            
+            # For the first forecast with no historical data, use a simple approach:
+            # Use the mean of recent day-ahead prices as the baseline prediction
+            if len(prices) > 0:
+                # Use recent average as baseline
+                recent_prices = prices.tail(48)  # Last 24 hours (48 half-hour periods)
+                baseline_day_ahead = recent_prices["day_ahead"].mean()
+                
+                # Add day_ahead column to fc using baseline
+                fc["day_ahead"] = baseline_day_ahead
+                fc["day_ahead_low"] = baseline_day_ahead * 0.9
+                fc["day_ahead_high"] = baseline_day_ahead * 1.1
+                
+                logger.info(f"Using baseline day-ahead price: {baseline_day_ahead:.2f}")
+            else:
+                # If no prices available, use a reasonable default
+                fc["day_ahead"] = 50.0  # £50/MWh as default
+                fc["day_ahead_low"] = 45.0
+                fc["day_ahead_high"] = 55.0
+                logger.warning("No price history available, using default baseline")
+        else:
+            # Train XGBoost model
+            logger.info("Training XGBoost model")
+            xg_model, scores = train_xgboost_model(train_X, train_y)
+            mean_score = -np.mean(scores)
+            stdev_score = np.std(scores)
+            
+            # Generate predictions
+            logger.info("Generating forecast predictions")
+            fc = generate_forecast_predictions(xg_model, fc, prices, test_X, test_y)
+        
+        # Create Agile predictions for all regions
+        logger.info("Creating Agile price predictions for all regions")
+        ag = create_agile_predictions(fc)
+        
+        # Save forecast to database
+        logger.info("Saving forecast to database")
+        forecast = save_forecast_to_db(
+            db,
+            new_name,
+            fc,
+            ag,
+            mean_score=mean_score,
+            stdev_score=stdev_score
+        )
+        
+        logger.info(f"Forecast update completed successfully: {forecast.id} - {forecast.name}")
         job_status["last_update"] = datetime.now()
         job_status["last_update_error"] = None
         
     except Exception as e:
-        logger.error("Forecast update failed: %s", str(e))
+        logger.error(f"Forecast update failed: {str(e)}", exc_info=True)
         job_status["last_update_error"] = str(e)
         job_status["last_update"] = datetime.now()
+        if db is not None:
+            db.rollback()
     finally:
-        db.close()
+        if db is not None:
+            db.close()
 
 
 def update_latest_agile():

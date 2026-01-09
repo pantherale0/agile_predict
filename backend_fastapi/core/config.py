@@ -5,17 +5,21 @@ from typing import List
 import os
 from pathlib import Path
 
+# Get the directory of this config file (backend_fastapi/core/)
+CONFIG_DIR = Path(__file__).parent
+# Get backend_fastapi directory
+BACKEND_DIR = CONFIG_DIR.parent
+# Point to backend_fastapi/.env specifically, not parent directories
+ENV_FILE = BACKEND_DIR / ".env"
+
 
 class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
     
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=str(ENV_FILE) if ENV_FILE.exists() else None,
         case_sensitive=True,
-        json_schema_extra={"env": {
-            "ALLOWED_HOSTS": {"case_sensitive": False},
-            "CORS_ORIGINS": {"case_sensitive": False},
-        }}
+        populate_by_name=True,  # Allow both field name and alias
     )
     
     # Project
@@ -33,13 +37,16 @@ class Settings(BaseSettings):
     
     # Security
     SECRET_KEY: str = "your-secret-key-change-in-production"
-    ALLOWED_HOSTS: List[str] = Field(
-        default=["localhost", "127.0.0.1", "agilepredict.com", ".agilepredict.com", ".fly.dev"]
+    # Use string fields with validator instead of List to avoid JSON parsing
+    ALLOWED_HOSTS_STR: str = Field(
+        default="localhost,127.0.0.1,agilepredict.com,.agilepredict.com,.fly.dev",
+        alias="ALLOWED_HOSTS"
     )
     
     # CORS
-    CORS_ORIGINS: List[str] = Field(
-        default=["http://localhost:3000", "http://localhost:5173"]
+    CORS_ORIGINS_STR: str = Field(
+        default="http://localhost:3000,http://localhost:5173",
+        alias="CORS_ORIGINS"
     )
     CORS_CREDENTIALS: bool = True
     CORS_METHODS: List[str] = ["*"]
@@ -65,13 +72,15 @@ class Settings(BaseSettings):
     LOCAL_SYNC_DIR: str = "temp"
     LOCAL_SYNC_HDF_FILE: str = "forecast.hdf"
     
-    @field_validator("ALLOWED_HOSTS", "CORS_ORIGINS", mode="before")
-    @classmethod
-    def parse_comma_separated(cls, v):
-        """Parse comma-separated strings from environment variables."""
-        if isinstance(v, str):
-            return [item.strip() for item in v.split(",") if item.strip()]
-        return v
+    @property
+    def ALLOWED_HOSTS(self) -> List[str]:
+        """Parse ALLOWED_HOSTS from comma-separated string."""
+        return [item.strip() for item in self.ALLOWED_HOSTS_STR.split(",") if item.strip()]
+    
+    @property
+    def CORS_ORIGINS(self) -> List[str]:
+        """Parse CORS_ORIGINS from comma-separated string."""
+        return [item.strip() for item in self.CORS_ORIGINS_STR.split(",") if item.strip()]
 
 
 settings = Settings()

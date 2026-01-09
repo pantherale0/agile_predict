@@ -1,6 +1,6 @@
 """Admin resource definitions for model management using starlette-admin."""
 from starlette_admin.contrib.sqla import ModelView
-from models import Forecast, ForecastData, PriceHistory, AgileData, History
+from models import Forecast, ForecastData, PriceHistory, AgileData, History, TaskLog
 
 
 def register_admin_models(admin):
@@ -14,3 +14,4 @@ def register_admin_models(admin):
     admin.add_view(ModelView(model=PriceHistory, name="Price History", icon="fa fa-dollar"))
     admin.add_view(ModelView(model=AgileData, name="Agile Data", icon="fa fa-bolt"))
     admin.add_view(ModelView(model=History, name="History", icon="fa fa-history"))
+    admin.add_view(ModelView(model=TaskLog, name="Task Logs", icon="fa fa-tasks"))
