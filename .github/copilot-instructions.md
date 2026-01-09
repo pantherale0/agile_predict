@@ -35,7 +35,7 @@ Agile Predict is a Django-based web application that forecasts Octopus Agile ele
    ```
 
 2. Activate the virtual environment:
-   - Windows: `.venv\Scripts\activate` (or `.venv\Scripts\activate.bat`)
+   - Windows: `.venv\Scripts\activate`
    - Unix/macOS: `source .venv/bin/activate`
 
 3. Install dependencies:
@@ -158,10 +158,9 @@ docker run -p 8000:8000 agile_predict
 
 ## Dependencies Management
 
-- All Python dependencies are listed in `requirements.txt`
+- All Python dependencies are listed in `requirements.txt` with pinned versions
 - Update dependencies carefully, ensuring compatibility
 - Test after updating dependencies
-- Consider using `pip freeze` to lock versions
 
 ## Files to Ignore
 
