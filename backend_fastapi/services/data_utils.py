@@ -51,7 +51,9 @@ class DataSet:
     def __init__(self, *args, **kwargs) -> None:
         self.params = kwargs.pop("params", {})
         self.tz = kwargs.pop("tz", "UTC")
-        self.__dict__ = self.__dict__ | kwargs
+        # Set all other kwargs as attributes
+        for key, value in kwargs.items():
+            setattr(self, key, value)
 
     def download(self, tz="GB", params=None) -> Tuple[pd.DataFrame, Optional[int]]:
         """Download data from the configured URL.
@@ -430,17 +432,19 @@ def model_to_df(db: Session, model_class) -> Tuple[pd.DataFrame, pd.Timestamp]:
     Returns:
         Tuple of (DataFrame, start_timestamp)
     """
+    from sqlalchemy import inspect
+    
     records = db.query(model_class).all()
     start = pd.Timestamp("2023-07-01", tz="GB")
     
     if not records:
         return pd.DataFrame(), start
     
-    df = pd.DataFrame([{
-        "date_time": r.date_time,
-        **{col: getattr(r, col) for col in dir(r) 
-           if not col.startswith('_') and col not in ['date_time', 'id', 'metadata', 'registry']}
-    } for r in records])
+    # Get column names from the model using SQLAlchemy inspection
+    columns = [c.name for c in inspect(model_class).columns if c.name not in ['id']]
+    
+    # Convert records to list of dictionaries
+    df = pd.DataFrame([{col: getattr(r, col) for col in columns} for r in records])
     
     df.index = pd.to_datetime(df["date_time"])
     df = df.sort_index()

@@ -184,7 +184,8 @@ def prepare_training_data(
     
     # Limit test set size
     if len(test_X) > MAX_TEST_X:
-        _, test_X, _, test_y = train_test_split(test_X, test_y, test_size=MAX_TEST_X, random_state=42)
+        # Keep a random sample of MAX_TEST_X samples
+        test_X, _, test_y, _ = train_test_split(test_X, test_y, train_size=MAX_TEST_X, random_state=42)
     
     logger.info(f"Training data: {len(train_X)} samples, Test data: {len(test_X)} samples")
     
@@ -204,7 +205,9 @@ def train_xgboost_model(
     Returns:
         Tuple of (trained model, cross-validation scores)
     """
-    # Calculate sample weights
+    # Calculate sample weights to emphasize extreme values
+    # Formula: log10(|error| + 10) * 5 - 4
+    # This gives more weight to predictions that are further from the mean
     sample_weights = ((np.log10((train_y - train_y.mean()).abs() + 10) * 5) - 4).round(0)
     
     # Initialize XGBoost model
@@ -277,6 +280,8 @@ def generate_forecast_predictions(
             kde = KernelDensity()
             kde.fit(results[["dt", "pred", "day_ahead"]].to_numpy())
             
+            # Calculate price range limits for KDE
+            # Using factors of 11 and 9 to provide reasonable price boundaries
             xlim = (
                 np.floor(results[["pred", "day_ahead"]].min(axis=1).min() / 11) * 10,
                 np.ceil(results[["pred", "day_ahead"]].max(axis=1).max() / 9) * 10,

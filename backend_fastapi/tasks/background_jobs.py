@@ -56,8 +56,8 @@ def update_forecasts():
     This is equivalent to: python manage.py update
     Runs the ML model to generate new forecasts based on recent data.
     """
-    db = SessionLocal()
     try:
+        db = SessionLocal()
         logger.info("Starting forecast update task")
         
         # Import required modules
@@ -93,7 +93,9 @@ def update_forecasts():
                             break
         
         # Delete forecasts not in the keep list
-        db.query(Forecast).filter(~Forecast.id.in_(forecasts_to_keep)).delete(synchronize_session=False)
+        forecasts_to_delete = db.query(Forecast).filter(~Forecast.id.in_(forecasts_to_keep)).all()
+        for forecast in forecasts_to_delete:
+            db.delete(forecast)
         db.commit()
         logger.info(f"Cleaned up forecasts, keeping {len(forecasts_to_keep)}")
         

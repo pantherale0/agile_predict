@@ -2,6 +2,7 @@ __pycache__/
 .venv/
 .local/
 *.sqlite3*
+*.db
 *.bat
 .env
 logs/
