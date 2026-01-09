@@ -16,6 +16,9 @@ from models import History, Forecast, PriceHistory, ForecastData, AgileData
 
 logger = logging.getLogger(__name__)
 
+# Constants
+AGILE_REGIONS = ["G", "X"]
+
 # Job status tracking
 job_status = {
     "last_update": None,
@@ -174,15 +177,13 @@ def sync_local_data():
         
         for index, row in ph.iterrows():
             try:
-                existing = db.query(PriceHistory).filter(PriceHistory.date_time == index).first()
-                if not existing:
-                    new_ph = PriceHistory(
-                        date_time=index,
-                        day_ahead=row["day_ahead"],
-                        agile=row["agile"]
-                    )
-                    db.add(new_ph)
-                    stats["price_history_added"] += 1
+                new_ph = PriceHistory(
+                    date_time=index,
+                    day_ahead=row["day_ahead"],
+                    agile=row["agile"]
+                )
+                db.add(new_ph)
+                stats["price_history_added"] += 1
             except Exception as e:
                 logger.error(f"Error importing price history at {index}: {str(e)}")
         
@@ -191,7 +192,6 @@ def sync_local_data():
         
         # Import Forecasts and related data
         logger.info("Importing Forecasts...")
-        model_ff = [x.name for x in db.query(Forecast.name).all()]
         
         for index, row in ff.iterrows():
             try:
@@ -239,8 +239,8 @@ def sync_local_data():
                 agile_df = ad[ad["forecast_id"] == forecast_id].set_index("date_time")
                 if len(agile_df) > 0:
                     for ad_index, ad_row in agile_df.iterrows():
-                        # Import for both regions (G and X)
-                        for region in ["G", "X"]:
+                        # Import for all configured regions
+                        for region in AGILE_REGIONS:
                             try:
                                 existing_ad = db.query(AgileData).filter(
                                     AgileData.forecast_id == ff_obj.id,
@@ -262,11 +262,12 @@ def sync_local_data():
                             except Exception as e:
                                 logger.error(f"Error importing agile data for {index} at {ad_index}, region {region}: {str(e)}")
                 
-                db.commit()
-                
             except Exception as e:
                 logger.error(f"Error processing forecast {index}: {str(e)}")
                 db.rollback()
+        
+        # Commit all forecast-related changes at once
+        db.commit()
         
         logger.info(f"Sync completed - Forecasts: {stats['forecasts_added']}, "
                    f"ForecastData: {stats['forecast_data_added']}, "
