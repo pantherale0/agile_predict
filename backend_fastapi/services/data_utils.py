@@ -176,33 +176,55 @@ class DataSet:
 
 
 def get_gb60() -> pd.Series:
-    """Fetch GB60 day-ahead prices from Nord Pool.
+    """Fetch GB60 day-ahead prices from Nord Pool public data page.
+    
+    Scrapes the public data from the Nord Pool website instead of using
+    the API which requires authentication.
     
     Returns:
         Series with day-ahead prices indexed by datetime
     """
-    url = "https://dataportal-api.nordpoolgroup.com/api/DayAheadPrices"
+    # Calculate delivery date (typically tomorrow)
+    delivery_date = (pd.Timestamp.now() + pd.Timedelta("13h")).strftime("%Y-%m-%d")
     
+    url = "https://data.nordpoolgroup.com/auction/gb-half-hour/prices"
     params = {
-        "date": (pd.Timestamp.now() + pd.Timedelta("13h")).strftime("%Y-%m-%d"),
-        "market": "N2EX_DayAhead",
-        "deliveryArea": "UK",
+        "deliveryDate": delivery_date,
         "currency": "GBP",
+        "aggregation": "DeliveryPeriod",
+        "deliveryAreas": "UK",
     }
     
     try:
         r = requests.get(url, params=params)
         r.raise_for_status()
     except requests.exceptions.RequestException as e:
-        logger.error(f"Error fetching GB60 data: {e}")
+        logger.error(f"Error fetching GB60 data from {url}: {e}")
         return pd.Series([], dtype=float, index=pd.DatetimeIndex([]))
     
     try:
-        price = pd.Series({
-            pd.Timestamp(row["deliveryStart"]).tz_convert("GB"): float(row["entryPerArea"]["UK"])
-            for row in r.json()["multiAreaEntries"]
-        })
-        return price
+        data = r.json()
+        
+        # Parse the response structure
+        # Expected structure: list of price entries with delivery time and price
+        if isinstance(data, list):
+            prices = {}
+            for entry in data:
+                # Try different possible field names for delivery time and price
+                delivery_time = entry.get("deliveryStart") or entry.get("deliveryPeriodStart") or entry.get("startTime")
+                price_value = entry.get("price") or entry.get("value")
+                
+                if delivery_time and price_value is not None:
+                    timestamp = pd.Timestamp(delivery_time).tz_convert("GB")
+                    prices[timestamp] = float(price_value)
+            
+            if prices:
+                return pd.Series(prices).sort_index()
+        
+        # If we get here, the structure wasn't as expected
+        logger.warning(f"Unexpected GB60 data structure: {data}")
+        return pd.Series([], dtype=float, index=pd.DatetimeIndex([]))
+        
     except Exception as e:
         logger.error(f"Error parsing GB60 data: {e}")
         return pd.Series([], dtype=float, index=pd.DatetimeIndex([]))
