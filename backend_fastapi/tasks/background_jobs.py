@@ -567,8 +567,8 @@ def _import_price_history(db: Session, price_history_df: pd.DataFrame) -> int:
         try:
             price_record = PriceHistory(
                 date_time=timestamp,
-                day_ahead=row["day_ahead"],
-                agile=row["agile"]
+                day_ahead=float(row["day_ahead"]),
+                agile=float(row["agile"])
             )
             db.add(price_record)
             records_added += 1
@@ -611,14 +611,14 @@ def _import_forecast_data(
                 forecast_data = ForecastData(
                     forecast_id=forecast.id,
                     date_time=timestamp,
-                    day_ahead=row.get("day_ahead"),
-                    bm_wind=row.get("bm_wind"),
-                    solar=row.get("solar"),
-                    emb_wind=row.get("emb_wind"),
-                    temp_2m=row.get("temp_2m"),
-                    wind_10m=row.get("wind_10m"),
-                    rad=row.get("rad"),
-                    demand=row.get("demand")
+                    day_ahead=float(row.get("day_ahead")) if row.get("day_ahead") is not None else None,
+                    bm_wind=float(row.get("bm_wind")) if row.get("bm_wind") is not None else None,
+                    solar=float(row.get("solar")) if row.get("solar") is not None else None,
+                    emb_wind=float(row.get("emb_wind")) if row.get("emb_wind") is not None else None,
+                    temp_2m=float(row.get("temp_2m")) if row.get("temp_2m") is not None else None,
+                    wind_10m=float(row.get("wind_10m")) if row.get("wind_10m") is not None else None,
+                    rad=float(row.get("rad")) if row.get("rad") is not None else None,
+                    demand=float(row.get("demand")) if row.get("demand") is not None else None
                 )
                 db.add(forecast_data)
                 records_added += 1
@@ -667,9 +667,9 @@ def _import_agile_data(
                         forecast_id=forecast.id,
                         date_time=timestamp,
                         region=region,
-                        agile_pred=row.get("agile_pred"),
-                        agile_low=row.get("agile_low"),
-                        agile_high=row.get("agile_high")
+                        agile_pred=float(row.get("agile_pred")) if row.get("agile_pred") is not None else None,
+                        agile_low=float(row.get("agile_low")) if row.get("agile_low") is not None else None,
+                        agile_high=float(row.get("agile_high")) if row.get("agile_high") is not None else None
                     )
                     db.add(agile_data)
                     records_added += 1
