@@ -61,7 +61,7 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: ./backend_fastapi
-          push: ${{ github.event_name == 'push' }}
+          push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
@@ -104,7 +104,7 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: ./frontend
-          push: ${{ github.event_name == 'push' }}
+          push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
