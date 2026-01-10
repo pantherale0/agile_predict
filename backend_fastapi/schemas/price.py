@@ -1,7 +1,7 @@
 """Pydantic schemas for price-related endpoints."""
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Any
 
 
 class PriceHistoryResponse(BaseModel):
@@ -11,8 +11,7 @@ class PriceHistoryResponse(BaseModel):
     day_ahead: float
     agile: float
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class GenerationDataResponse(BaseModel):
@@ -29,8 +28,7 @@ class GenerationDataResponse(BaseModel):
     rad: float
     demand: float
     
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class StatsResponse(BaseModel):
@@ -39,3 +37,8 @@ class StatsResponse(BaseModel):
     trend_image: Optional[str] = None
     diagnostic_plots: list = []
     message: Optional[str] = None
+    summary_stats: Optional[dict] = None
+    forecast_accuracy: Optional[dict] = None
+    date_range: Optional[dict] = None
+    
+    model_config = ConfigDict(extra='allow')

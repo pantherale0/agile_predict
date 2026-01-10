@@ -1,11 +1,12 @@
 """Main FastAPI application."""
-from fastapi import FastAPI
-from fastapi.responses import JSONResponse, HTMLResponse
+from fastapi import FastAPI, Depends, Request
+from fastapi.responses import JSONResponse, HTMLResponse, RedirectResponse
 from contextlib import asynccontextmanager
 import logging
 
 from core.config import settings
 from core.security import add_cors_middleware, add_trusted_host_middleware
+from core.auth import get_current_user, User, oidc_provider
 from core.database import engine
 from models import Base
 from api.endpoints import forecasts, price_history, tasks
@@ -52,16 +53,25 @@ admin = setup_admin(app)
 register_admin_models(admin)
 
 # Health check endpoint
-@app.get("/health")
+@app.get("/health", include_in_schema=False)
 async def health_check():
-    """Health check endpoint."""
+    """Health check endpoint - Public endpoint."""
     return JSONResponse({"status": "healthy", "version": settings.PROJECT_VERSION})
 
 
 # Scheduler Status Page
-@app.get("/scheduler-status", response_class=HTMLResponse)
+@app.get("/scheduler-status", response_class=HTMLResponse, include_in_schema=False)
 async def scheduler_status_page():
-    """Display scheduler status page with trigger buttons."""
+    """Display scheduler status page with trigger buttons.
+    
+    Client-side OAuth2 authentication via localStorage token.
+    """
+    # Return HTML with client-side auth check
+    return _get_scheduler_status_html()
+
+
+def _get_scheduler_status_html():
+    """Generate HTML with client-side OAuth2 auth check."""
     status = get_scheduler_status()
     
     # Build HTML table with jobs
@@ -105,7 +115,14 @@ async def scheduler_status_page():
         </style>
     </head>
     <body>
-        <div class="container">
+        <div id="auth-check" class="container" style="margin-top: 50px; text-align: center; display: none;">
+            <h2>🔐 Authentication Required</h2>
+            <p class="text-muted">You need to log in to access this page.</p>
+            <p id="auth-message" class="text-warning" style="display: none;"></p>
+            <a href="/api/auth/login?admin=true" class="btn btn-primary btn-lg">Login with Authentik</a>
+        </div>
+        
+        <div id="content" class="container" style="display: none;">
             <div class="header-section">
                 <h1>⏰ Scheduler Status</h1>
                 <p class="info-text">Manage and monitor scheduled background jobs</p>
@@ -140,26 +157,81 @@ async def scheduler_status_page():
                 <a href="/admin/" class="btn btn-secondary">🎛️ Admin Dashboard</a>
             </div>
         </div>
+        </div>
         
         <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
         <script src="https://cdn.jsdelivr.net/npm/bootstrap@4.6.0/dist/js/bootstrap.min.js"></script>
         <script>
+            // Validate token with server before showing content
+            window.addEventListener('DOMContentLoaded', async function() {{
+                const token = localStorage.getItem('access_token');
+                if (!token) {{
+                    showAuthCheck();
+                    return;
+                }}
+                
+                // Validate token with server
+                try {{
+                    const response = await fetch('/api/auth/validate-token', {{
+                        headers: {{
+                            'Authorization': `Bearer ${{token}}`
+                        }}
+                    }});
+                    
+                    if (response.ok) {{
+                        showContent();
+                    }} else if (response.status === 401) {{
+                        // Token expired or invalid - clear it and show login
+                        localStorage.removeItem('access_token');
+                        showAuthCheck("Token expired. Please log in again.");
+                    }} else {{
+                        localStorage.removeItem('access_token');
+                        showAuthCheck();
+                    }}
+                }} catch (error) {{
+                    console.error('Token validation failed:', error);
+                    showAuthCheck();
+                }}
+            }});
+            
+            function showAuthCheck(message = null) {{
+                document.getElementById('auth-check').style.display = 'block';
+                document.getElementById('content').style.display = 'none';
+                if (message) {{
+                    const msgEl = document.getElementById('auth-message');
+                    if (msgEl) {{
+                        msgEl.textContent = message;
+                        msgEl.style.display = 'block';
+                    }}
+                }}
+            }}
+            
+            function showContent() {{
+                document.getElementById('auth-check').style.display = 'none';
+                document.getElementById('content').style.display = 'block';
+            }}
+            
             function triggerJob(jobId) {{
                 const btn = event.target;
                 const originalText = btn.textContent;
                 btn.disabled = true;
                 btn.textContent = '⏳ Triggering...';
+                const token = localStorage.getItem('access_token');
                 
                 fetch(`/api/tasks/jobs/${{jobId}}/trigger`, {{
                     method: 'POST',
-                    headers: {{'Content-Type': 'application/json'}}
+                    headers: {{'Content-Type': 'application/json', 'Authorization': token ? `Bearer ${{token}}` : ''}}
                 }})
                 .then(r => {{
+                    if (r.status === 401) {{
+                        window.location.href = '/api/auth/login';
+                        return;
+                    }}
                     if (!r.ok) throw new Error(`HTTP ${{r.status}}`);
                     return r.json();
                 }})
                 .then(data => {{
-                    if (data.success) {{
+                    if (data && data.success) {{
                         btn.textContent = '✅ Success!';
                         btn.classList.remove('btn-primary');
                         btn.classList.add('btn-success');
@@ -170,7 +242,7 @@ async def scheduler_status_page():
                             btn.disabled = false;
                         }}, 2000);
                     }} else {{
-                        throw new Error(data.message);
+                        throw new Error(data?.message || 'Unknown error');
                     }}
                 }})
                 .catch(e => {{
@@ -198,6 +270,162 @@ async def scheduler_status_page():
     return html
 
 
+# OAuth2 / OIDC Endpoints
+@app.get("/api/auth/login", summary="Initiate OAuth2 Login", include_in_schema=False)
+async def oauth2_login(admin: str = None):
+    """Redirect to OIDC provider for authentication.
+    
+    Args:
+        admin: Optional flag indicating admin login (e.g., ?admin=true)
+    """
+    if not settings.OAUTH2_ENABLED or not oidc_provider:
+        return JSONResponse(
+            {"error": "OAuth2 is not configured"},
+            status_code=501
+        )
+    
+    try:
+        config = await oidc_provider.get_discovery_config()
+        auth_endpoint = config.get("authorization_endpoint")
+        
+        if not auth_endpoint:
+            raise ValueError("authorization_endpoint not found in discovery config")
+        
+        # Generate state for CSRF protection
+        import secrets
+        
+        state = secrets.token_urlsafe(32)
+        
+        # Build authorization URL without PKCE (simplify for now)
+        auth_url = (
+            f"{auth_endpoint}?"
+            f"client_id={settings.OAUTH2_CLIENT_ID}&"
+            f"redirect_uri={settings.OAUTH2_REDIRECT_URI}&"
+            f"response_type=code&"
+            f"scope=openid%20profile%20email&"
+            f"state={state}"
+        )
+        
+        logger.info(f"Redirecting to OAuth2 provider: {settings.OAUTH2_PROVIDER_NAME}")
+        return RedirectResponse(url=auth_url)
+    except Exception as e:
+        logger.error(f"OAuth2 login error: {e}")
+        return JSONResponse(
+            {"error": "Failed to initiate login"},
+            status_code=500
+        )
+
+
+@app.get("/api/auth/callback", summary="OAuth2 Callback", include_in_schema=False)
+async def oauth2_callback(request: Request, code: str, state: str):
+    """Handle OAuth2 provider callback.
+    
+    Args:
+        request: The incoming request
+        code: Authorization code from provider
+        state: State parameter for CSRF protection
+        
+    Returns:
+        Token response with access_token and redirect
+    """
+    if not settings.OAUTH2_ENABLED or not oidc_provider:
+        return JSONResponse(
+            {"error": "OAuth2 is not configured"},
+            status_code=501
+        )
+    
+    try:
+        import httpx
+        
+        config = await oidc_provider.get_discovery_config()
+        token_endpoint = config.get("token_endpoint")
+        
+        if not token_endpoint:
+            raise ValueError("token_endpoint not found in discovery config")
+        
+        # Exchange authorization code for tokens
+        async with httpx.AsyncClient() as client:
+            token_response = await client.post(
+                token_endpoint,
+                data={
+                    "grant_type": "authorization_code",
+                    "code": code,
+                    "client_id": settings.OAUTH2_CLIENT_ID,
+                    "client_secret": settings.OAUTH2_CLIENT_SECRET,
+                    "redirect_uri": settings.OAUTH2_REDIRECT_URI,
+                },
+                headers={"Accept": "application/json"},
+                timeout=10.0
+            )
+            
+            if token_response.status_code != 200:
+                error_detail = token_response.text
+                logger.error(f"Token exchange failed: {error_detail}")
+                raise ValueError(f"Token endpoint returned {token_response.status_code}: {error_detail}")
+            
+            tokens = token_response.json()
+        
+        # Get the token (try access_token first, then id_token)
+        access_token = tokens.get("access_token") or tokens.get("id_token")
+        
+        if not access_token:
+            raise ValueError("No access token in response")
+        
+        # Check if this was an admin login
+        redirect_to = "/admin/" if request.query_params.get("admin") else "/scheduler-status"
+        
+        # Return HTML that stores token in both localStorage and cookie
+        html = f"""
+        <html>
+        <head><title>Login Success</title></head>
+        <body>
+            <p>Authenticating...</p>
+            <script>
+                localStorage.setItem('access_token', '{access_token}');
+                window.location.href = '{redirect_to}';
+            </script>
+        </body>
+        </html>
+        """
+        
+        response = HTMLResponse(html)
+        # Set secure cookie so server middleware can read the token
+        response.set_cookie(
+            key="access_token",
+            value=access_token,
+            httponly=False,  # Allow JavaScript to read it
+            secure=not settings.DEBUG,  # HTTPS only if not in debug mode
+            samesite="lax",
+            max_age=3600  # 1 hour
+        )
+        return response
+    except Exception as e:
+        logger.error(f"OAuth2 callback error: {e}")
+        return HTMLResponse(
+            f"<h1>Authentication Failed</h1><p>{str(e)}</p>",
+            status_code=400
+        )
+
+
+@app.get("/api/auth/validate-token", summary="Validate OAuth2 Token", include_in_schema=False)
+async def validate_token(current_user: User = Depends(get_current_user)):
+    """Validate the OAuth2 token.
+    
+    Returns the authenticated user info if token is valid.
+    Returns 401 Unauthorized if token is invalid or missing.
+    
+    This endpoint is used by the frontend to verify tokens before showing protected content.
+    """
+    return {
+        "valid": True,
+        "user": {
+            "username": current_user.username,
+            "email": current_user.email,
+            "is_admin": current_user.is_admin,
+            "groups": current_user.groups
+        }
+    }
+
 
 # Include routers
 app.include_router(forecasts.router, prefix=settings.API_V1_STR)
@@ -206,7 +434,7 @@ app.include_router(tasks.router)
 
 
 # Root endpoint
-@app.get("/")
+@app.get("/", include_in_schema=False)
 async def root():
     """Root endpoint."""
     return {

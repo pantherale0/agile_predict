@@ -37,6 +37,33 @@ class Settings(BaseSettings):
     
     # Security
     SECRET_KEY: str = "your-secret-key-change-in-production"
+    ALGORITHM: str = "HS256"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
+    
+    # OAuth2 / OIDC External Provider Configuration
+    # Example: Authentik, Azure Entra, Google, etc.
+    OAUTH2_ENABLED: bool = True
+    OAUTH2_PROVIDER_NAME: str = Field(
+        default="authentik",
+        alias="OAUTH2_PROVIDER"
+    )  # e.g., 'authentik', 'azure', 'google'
+    OAUTH2_CLIENT_ID: str = Field(default="", alias="OAUTH2_CLIENT_ID")
+    OAUTH2_CLIENT_SECRET: str = Field(default="", alias="OAUTH2_CLIENT_SECRET")
+    OAUTH2_DISCOVERY_URL: str = Field(
+        default="",
+        alias="OAUTH2_DISCOVERY_URL"
+    )  # e.g., https://authentik.example.com/application/o/ for Authentik
+    OAUTH2_REDIRECT_URI: str = Field(
+        default="http://localhost:8000/api/auth/callback",
+        alias="OAUTH2_REDIRECT_URI"
+    )
+    
+    # Admin group/role in the OIDC provider (e.g., 'admin-group' in Authentik)
+    OAUTH2_ADMIN_GROUP: str = Field(
+        default="admin",
+        alias="OAUTH2_ADMIN_GROUP"
+    )
+    
     # Use string fields with validator instead of List to avoid JSON parsing
     ALLOWED_HOSTS_STR: str = Field(
         default="localhost,127.0.0.1,agilepredict.com,.agilepredict.com,.fly.dev",

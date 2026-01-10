@@ -1,12 +1,17 @@
 """Task management endpoints for background jobs."""
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Depends
 from pydantic import BaseModel
 from typing import List, Optional
-from datetime import datetime
+import logging
 
 from tasks.scheduler import get_scheduler_status, trigger_job
+from core.auth import User
+from api.deps import get_admin_user
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])
+
 
 
 class JobInfo(BaseModel):
@@ -30,22 +35,28 @@ class JobTriggerResult(BaseModel):
     message: str
 
 
-@router.get("/scheduler/status", response_model=SchedulerStatus, summary="Get Scheduler Status")
-def get_scheduler_status_endpoint():
+@router.get("/scheduler/status", response_model=SchedulerStatus, summary="Get Scheduler Status", include_in_schema=False)
+def get_scheduler_status_endpoint(current_user: User = Depends(get_admin_user)):
     """Get the current status of the background scheduler.
+    
+    **Requires OAuth2 authentication**
     
     Returns:
         SchedulerStatus: Current scheduler status and job information
     """
+    logger.info(f"Scheduler status accessed by user: {current_user.username}")
     return get_scheduler_status()
 
 
-@router.post("/jobs/{job_id}/trigger", response_model=JobTriggerResult, summary="Trigger Job")
-def trigger_job_endpoint(job_id: str):
+@router.post("/jobs/{job_id}/trigger", response_model=JobTriggerResult, summary="Trigger Job", include_in_schema=False)
+def trigger_job_endpoint(job_id: str, current_user: User = Depends(get_admin_user)):
     """Manually trigger a background job.
+    
+    **Requires OAuth2 authentication**
     
     Args:
         job_id: The ID of the job to trigger (e.g., 'update_latest_agile')
+        current_user: The authenticated user
         
     Returns:
         JobTriggerResult: Result of the trigger operation
@@ -57,19 +68,26 @@ def trigger_job_endpoint(job_id: str):
         - clean_forecasts: Clean old forecasts
         - sync_local: Sync local data
     """
+    logger.info(f"Job {job_id} triggered by user: {current_user.username}")
     result = trigger_job(job_id)
     if not result["success"]:
         raise HTTPException(status_code=400, detail=result["message"])
     return result
 
 
-@router.get("/jobs", summary="List All Jobs")
-def list_jobs():
+@router.get("/jobs", summary="List All Jobs", include_in_schema=False)
+def list_jobs(current_user: User = Depends(get_admin_user)):
     """Get a list of all scheduled jobs with their details.
+    
+    **Requires OAuth2 authentication**
+    
+    Args:
+        current_user: The authenticated user
     
     Returns:
         dict: Scheduler status with jobs list
     """
+    logger.info(f"Jobs list accessed by user: {current_user.username}")
     status = get_scheduler_status()
     return {
         "total_jobs": len(status["jobs"]),
@@ -78,16 +96,20 @@ def list_jobs():
     }
 
 
-@router.get("/jobs/{job_id}/details", summary="Get Job Details")
-def get_job_details(job_id: str):
+@router.get("/jobs/{job_id}/details", summary="Get Job Details", include_in_schema=False)
+def get_job_details(job_id: str, current_user: User = Depends(get_admin_user)):
     """Get detailed information about a specific job.
+    
+    **Requires OAuth2 authentication**
     
     Args:
         job_id: The ID of the job
+        current_user: The authenticated user
         
     Returns:
         dict: Job details and last execution status
     """
+    logger.info(f"Job details for {job_id} accessed by user: {current_user.username}")
     status = get_scheduler_status()
     job = next((j for j in status["jobs"] if j["id"] == job_id), None)
     
@@ -110,13 +132,19 @@ def get_job_details(job_id: str):
     }
 
 
-@router.get("/status/summary", summary="Get Job Status Summary")
-def get_status_summary():
+@router.get("/status/summary", summary="Get Job Status Summary", include_in_schema=False)
+def get_status_summary(current_user: User = Depends(get_admin_user)):
     """Get a summary of all job execution statuses.
+    
+    **Requires OAuth2 authentication**
+    
+    Args:
+        current_user: The authenticated user
     
     Returns:
         dict: Summary of last execution times and errors for all jobs
     """
+    logger.info(f"Status summary accessed by user: {current_user.username}")
     status = get_scheduler_status()
     job_status = status["job_status"]
     

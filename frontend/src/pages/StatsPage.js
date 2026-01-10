@@ -42,37 +42,45 @@ function StatsPage() {
     return <div className="alert alert-warning">No stats available</div>;
   }
 
-  if (statsData.message) {
-    return (
-      <div className="container-lg fluid">
-        <div className="row">
-          <div className="col-lg p-4">
-            <h2 className="mb-4">Model Performance Statistics</h2>
-            <div className="alert alert-info">{statsData.message}</div>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
   // Safely access nested properties
   const statsChart = statsData?.stats_chart;
   const trendImage = statsData?.trend_image;
   const diagnosticPlots = statsData?.diagnostic_plots || [];
-
-  if (!statsChart || !statsChart.data || !statsChart.layout) {
-    return <div className="alert alert-warning">Stats data is incomplete or malformed</div>;
-  }
 
   return (
     <div className="container-lg fluid">
       <div className="row">
         <div className="col-lg p-4">
           <h2 className="mb-4">Model Performance Statistics</h2>
+          
+          {statsData.message && (
+            <div className="alert alert-info mb-4">{statsData.message}</div>
+          )}
+
+          {/* Stats Chart Section */}
+          {statsChart && statsChart.data && statsChart.layout ? (
+            <div className="stats-section mt-5">
+              <h4 className="mb-4">Price History Chart</h4>
+              <p className="text-muted">
+                This chart shows the actual Agile prices and Day-Ahead prices over the selected period.
+              </p>
+              <div className="row mt-3">
+                <Plot
+                  data={statsChart.data}
+                  layout={statsChart.layout}
+                  config={{ scrollZoom: true, responsive: true }}
+                  style={{ width: '100%' }}
+                  useResizeHandler
+                />
+              </div>
+            </div>
+          ) : (
+            <div className="alert alert-warning">No price chart data available</div>
+          )}
 
           {/* Trend Section */}
           {trendImage && (
-            <div className="stats-section">
+            <div className="stats-section mt-5">
               <h4 className="mb-4">Model RMS Error and Robustness vs Forecast Date</h4>
               <p className="text-muted">
                 This plot shows how the model fit to the training data and its robustness evolve over time as more
@@ -94,35 +102,71 @@ function StatsPage() {
             </div>
           )}
 
-          {/* Stats Chart Section */}
-          <div className="stats-section mt-5">
-            <h4 className="mb-4">Model Error Heatmap</h4>
-            <p className="text-muted">
-              The top plot shows the last week's actual Agile Price in yellow; the thin grey lines are the
-              historical forecasts. The heatmap below shows how the errors in the grey lines have evolved over
-              time with warm colours being big errors and blue being a perfect match.
-            </p>
-            <p className="text-muted">
-              If the model is behaving well you should see warmer colours bottom right (ie errors due to
-              forecasting a week ahead) and cooler colours towards the top and left.
-            </p>
-            <div className="row mt-3">
-              <Plot
-                data={statsChart.data}
-                layout={statsChart.layout}
-                config={{ scrollZoom: true, responsive: true }}
-                style={{ width: '100%' }}
-                useResizeHandler
-              />
+          {/* Summary Statistics Section */}
+          {statsData.summary_stats && (
+            <div className="stats-section mt-5">
+              <h4 className="mb-4">Summary Statistics</h4>
+              <div className="row">
+                {statsData.summary_stats.agile && (
+                  <div className="col-md-6 mb-4">
+                    <div className="card bg-dark border-secondary">
+                      <div className="card-body">
+                        <h5 className="card-title text-light">Agile Pricing Stats</h5>
+                        <ul className="list-unstyled text-muted">
+                          <li><strong>Min:</strong> £{statsData.summary_stats.agile.min?.toFixed(2) || 'N/A'}</li>
+                          <li><strong>Max:</strong> £{statsData.summary_stats.agile.max?.toFixed(2) || 'N/A'}</li>
+                          <li><strong>Mean:</strong> £{statsData.summary_stats.agile.mean?.toFixed(2) || 'N/A'}</li>
+                          <li><strong>Median:</strong> £{statsData.summary_stats.agile.median?.toFixed(2) || 'N/A'}</li>
+                          <li><strong>Std Dev:</strong> £{statsData.summary_stats.agile.std?.toFixed(2) || 'N/A'}</li>
+                        </ul>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                {statsData.summary_stats.day_ahead && (
+                  <div className="col-md-6 mb-4">
+                    <div className="card bg-dark border-secondary">
+                      <div className="card-body">
+                        <h5 className="card-title text-light">Day-Ahead Pricing Stats</h5>
+                        <ul className="list-unstyled text-muted">
+                          <li><strong>Min:</strong> £{statsData.summary_stats.day_ahead.min?.toFixed(2) || 'N/A'}</li>
+                          <li><strong>Max:</strong> £{statsData.summary_stats.day_ahead.max?.toFixed(2) || 'N/A'}</li>
+                          <li><strong>Mean:</strong> £{statsData.summary_stats.day_ahead.mean?.toFixed(2) || 'N/A'}</li>
+                          <li><strong>Median:</strong> £{statsData.summary_stats.day_ahead.median?.toFixed(2) || 'N/A'}</li>
+                          <li><strong>Std Dev:</strong> £{statsData.summary_stats.day_ahead.std?.toFixed(2) || 'N/A'}</li>
+                        </ul>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
+          )}
+
+          {/* Forecast Accuracy Section */}
+          {statsData.forecast_accuracy && (
+            <div className="stats-section mt-5">
+              <h4 className="mb-4">Forecast Accuracy</h4>
+              <div className="card bg-dark border-secondary">
+                <div className="card-body">
+                  <ul className="list-unstyled text-muted">
+                    <li><strong>RMSE:</strong> {statsData.forecast_accuracy.rmse?.toFixed(2) || 'N/A'}</li>
+                    <li><strong>MAE:</strong> {statsData.forecast_accuracy.mae?.toFixed(2) || 'N/A'}</li>
+                    <li><strong>MAPE:</strong> {statsData.forecast_accuracy.mape?.toFixed(2) || 'N/A'}%</li>
+                    <li><strong>Forecast Date:</strong> {statsData.forecast_accuracy.forecast_date || 'N/A'}</li>
+                    <li><strong>Samples:</strong> {statsData.forecast_accuracy.samples || 'N/A'}</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Diagnostic Plots Section */}
-          <div className="stats-section mt-5">
-            <h4 className="mb-4">Model Diagnostic Plots - Most Recent Forecast</h4>
-            <div className="row">
-              {diagnosticPlots && diagnosticPlots.length > 0 ? (
-                diagnosticPlots.map((plot, index) => (
+          {statsData.diagnostic_plots && statsData.diagnostic_plots.length > 0 && (
+            <div className="stats-section mt-5">
+              <h4 className="mb-4">Model Diagnostic Plots - Most Recent Forecast</h4>
+              <div className="row">
+                {statsData.diagnostic_plots.map((plot, index) => (
                   <div 
                     key={index}
                     className={index === 0 ? "col-lg-12 mb-4" : "col-md-6 mb-4"}
@@ -135,14 +179,10 @@ function StatsPage() {
                       alt={plot.filename}
                     />
                   </div>
-                ))
-              ) : (
-                <div className="col-12">
-                  <p className="text-muted">No diagnostic plots available. Run a forecast to generate them.</p>
-                </div>
-              )}
+                ))}
+              </div>
             </div>
-          </div>
+          )}
         </div>
       </div>
     </div>

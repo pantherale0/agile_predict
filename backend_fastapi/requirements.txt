@@ -26,3 +26,7 @@ requests==2.32.5
 python-dateutil==2.9.0.post0
 pytz==2025.2
 tzdata==2025.3
+# OAuth2 / OIDC Dependencies
+python-jose[cryptography]==3.3.0
+cryptography==43.0.0
+httpx==0.27.0

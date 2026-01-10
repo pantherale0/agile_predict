@@ -333,17 +333,53 @@ class StatsService:
                         "samples": len(forecast_values),
                     }
         
-        # Generate chart data (Plotly format)
+        # Generate Plotly chart for stats display
+        fig = go.Figure()
+        
+        # Convert datetime to ISO format strings for JSON serialization
+        x_dates = [dt.isoformat() for dt in df['date_time']]
+        
+        # Add actual prices trace
+        fig.add_trace(go.Scatter(
+            x=x_dates,
+            y=df['agile'].tolist(),
+            name='Actual Agile Price',
+            mode='lines',
+            line=dict(color='#FFD700', width=2),
+        ))
+        
+        # Add day-ahead prices trace
+        fig.add_trace(go.Scatter(
+            x=x_dates,
+            y=df['day_ahead'].tolist(),
+            name='Day-Ahead Price',
+            mode='lines',
+            line=dict(color='#1f77b4', width=1),
+        ))
+        
+        # Update layout
+        fig.update_layout(
+            title=f"Price History - Last {days} Days",
+            xaxis_title="Date",
+            yaxis_title="Price (p/kWh)",
+            hovermode='x unified',
+            height=500,
+            template='plotly_dark',
+        )
+        
+        # Convert figure to JSON format that can be sent to frontend
+        fig_dict = fig.to_dict()
         chart_data = {
-            "x": [p.date_time.isoformat() for p in prices],
-            "agile": [p.agile for p in prices],
-            "day_ahead": [p.day_ahead for p in prices],
+            "data": fig_dict.get("data", []),
+            "layout": fig_dict.get("layout", {}),
         }
         
         return {
+            "stats_chart": chart_data,
+            "trend_image": None,
+            "diagnostic_plots": [],
             "summary_stats": stats,
             "forecast_accuracy": forecast_accuracy,
-            "chart_data": chart_data,
             "date_range": {
                 "start": str(start_date),
                 "end": str(latest.date_time),
