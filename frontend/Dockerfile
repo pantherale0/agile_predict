@@ -38,6 +38,10 @@ RUN npm install -g serve
 COPY --from=builder /app/build ./build
 COPY --from=builder /app/public ./public
 
+# Copy entrypoint script for runtime configuration
+COPY docker-entrypoint.sh /app/docker-entrypoint.sh
+RUN chmod +x /app/docker-entrypoint.sh
+
 # Create non-root user for security
 RUN addgroup -g 1001 -S nodejs && \
     adduser -S nextjs -u 1001
@@ -51,5 +55,6 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
 # Expose port (listens on localhost, Caddy proxies externally)
 EXPOSE 3000
 
-# Run the app
+# Run entrypoint script which generates config and starts the app
+ENTRYPOINT ["/app/docker-entrypoint.sh"]
 CMD ["serve", "-s", "build", "-l", "3000"]

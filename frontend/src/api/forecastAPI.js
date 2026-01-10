@@ -1,6 +1,21 @@
 import axios from 'axios';
 
-const API_BASE = process.env.REACT_APP_API_URL || 'http://localhost:8000/api';
+// Get API URL from runtime configuration or use dynamic fallback
+// window.CONFIG is loaded from public/config.js at runtime
+const API_BASE = (() => {
+  // First, try to use the runtime config (set via environment variable in Docker)
+  if (window.CONFIG && window.CONFIG.API_URL) {
+    console.log('Using API URL from config:', window.CONFIG.API_URL);
+    return window.CONFIG.API_URL;
+  }
+  
+  // Fallback: use current host (works for same-origin deployments)
+  const protocol = window.location.protocol;
+  const host = window.location.host;
+  const url = `${protocol}//${host}/api`;
+  console.log('Using API URL from current host:', url);
+  return url;
+})();
 
 export const fetchRegionalForecast = (region, days = 14) => {
   return axios.get(`${API_BASE}/forecasts/${region}`, {
