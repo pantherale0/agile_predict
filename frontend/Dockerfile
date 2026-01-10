@@ -8,16 +8,20 @@ FROM node:22-alpine AS builder
 WORKDIR /app
 
 # Copy package files
-COPY package.json package-lock.json ./
+COPY package.json package-lock.json* ./
 
 # Install dependencies
-RUN npm ci --only=production && \
+RUN if [ -f package-lock.json ]; then \
+      npm ci --only=production; \
+    else \
+      npm install --only=production; \
+    fi && \
     npm cache clean --force
 
 # Copy source code
 COPY public ./public
 COPY src ./src
-COPY .env .env.production* ./
+COPY .env* ./
 
 # Build the app
 RUN npm run build
