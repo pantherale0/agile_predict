@@ -833,16 +833,16 @@ def configure_scheduled_jobs(scheduler: BackgroundScheduler):
     )
     logger.info("Scheduled: Update Latest Agile (every 30 minutes)")
     
-    # Update forecasts daily at 01:00 AM
+    # Update forecasts every 4 hours
     scheduler.add_job(
         update_forecasts,
-        trigger=CronTrigger(hour=1, minute=0),
+        trigger=CronTrigger(hour="*/4", minute=0),
         id="update_forecasts",
         name="Update Forecasts",
         misfire_grace_time=600,
         coalesce=True,
     )
-    logger.info("Scheduled: Update Forecasts (daily at 01:00)")
+    logger.info("Scheduled: Update Forecasts (every 4 hours)")
     
     # Update national Agile data every hour
     scheduler.add_job(

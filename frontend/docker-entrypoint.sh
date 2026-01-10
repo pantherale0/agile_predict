@@ -2,7 +2,7 @@
 # Generate config.js from environment variables at container startup
 # This allows runtime configuration without rebuilding the React app
 
-CONFIG_FILE="/app/frontend/public/config.js"
+CONFIG_FILE="/app/public/config.js"
 
 # Use REACT_APP_API_URL if provided, otherwise auto-detect
 if [ -z "$REACT_APP_API_URL" ]; then
