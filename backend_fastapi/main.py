@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 import logging
 
 from core.config import settings
-from core.security import add_cors_middleware, add_trusted_host_middleware
+from core.security import add_cors_middleware, add_trusted_host_middleware, add_proxy_headers_middleware
 from core.auth import get_current_user, User, oidc_provider
 from core.database import engine
 from models import Base
@@ -47,6 +47,7 @@ app = FastAPI(
 # Add middleware
 add_cors_middleware(app)
 add_trusted_host_middleware(app)
+add_proxy_headers_middleware(app)
 
 # Setup admin dashboard
 admin = setup_admin(app)
@@ -272,10 +273,11 @@ def _get_scheduler_status_html():
 
 # OAuth2 / OIDC Endpoints
 @app.get("/api/auth/login", summary="Initiate OAuth2 Login", include_in_schema=False)
-async def oauth2_login(admin: str = None):
+async def oauth2_login(request: Request, admin: str = None):
     """Redirect to OIDC provider for authentication.
     
     Args:
+        request: The incoming request (used for proper host detection)
         admin: Optional flag indicating admin login (e.g., ?admin=true)
     """
     if not settings.OAUTH2_ENABLED or not oidc_provider:
@@ -296,17 +298,22 @@ async def oauth2_login(admin: str = None):
         
         state = secrets.token_urlsafe(32)
         
+        # Build redirect_uri from request for proper host detection (handles reverse proxies)
+        # This ensures the callback URL matches what was registered in the OAuth2 provider
+        redirect_uri = str(request.url_for("oauth2_callback"))
+        
         # Build authorization URL without PKCE (simplify for now)
         auth_url = (
             f"{auth_endpoint}?"
             f"client_id={settings.OAUTH2_CLIENT_ID}&"
-            f"redirect_uri={settings.OAUTH2_REDIRECT_URI}&"
+            f"redirect_uri={redirect_uri}&"
             f"response_type=code&"
             f"scope=openid%20profile%20email&"
             f"state={state}"
         )
         
         logger.info(f"Redirecting to OAuth2 provider: {settings.OAUTH2_PROVIDER_NAME}")
+        logger.debug(f"Redirect URI: {redirect_uri}")
         return RedirectResponse(url=auth_url)
     except Exception as e:
         logger.error(f"OAuth2 login error: {e}")
@@ -316,7 +323,7 @@ async def oauth2_login(admin: str = None):
         )
 
 
-@app.get("/api/auth/callback", summary="OAuth2 Callback", include_in_schema=False)
+@app.get("/api/auth/callback", summary="OAuth2 Callback", include_in_schema=False, name="oauth2_callback")
 async def oauth2_callback(request: Request, code: str, state: str):
     """Handle OAuth2 provider callback.
     
