@@ -164,14 +164,18 @@ def update_forecasts():
                 total_added = 0
                 
                 for i in range(0, len(new_prices_deduped), batch_size):
-                    batch = new_prices_deduped.iloc[i:i+batch_size]
+                    batch = new_prices_deduped.iloc[i:i+batch_size].copy()
                     
                     try:
                         for timestamp, row in batch.iterrows():
+                            # Convert numpy types to native Python types explicitly
+                            day_ahead_val = float(row['day_ahead'])
+                            agile_val = float(row['agile'])
+                            
                             price_record = PriceHistory(
                                 date_time=timestamp,
-                                day_ahead=row['day_ahead'],
-                                agile=row['agile']
+                                day_ahead=day_ahead_val,
+                                agile=agile_val
                             )
                             db.add(price_record)
                         
@@ -253,7 +257,7 @@ def update_forecasts():
             if len(prices) > 0:
                 # Use recent average as baseline
                 recent_prices = prices.tail(48)  # Last 24 hours (48 half-hour periods)
-                baseline_day_ahead = recent_prices["day_ahead"].mean()
+                baseline_day_ahead = float(recent_prices["day_ahead"].mean())
                 
                 # Add day_ahead column to fc using baseline
                 fc["day_ahead"] = baseline_day_ahead
@@ -271,8 +275,8 @@ def update_forecasts():
             # Train XGBoost model
             logger.info("Training XGBoost model")
             xg_model, scores = train_xgboost_model(train_X, train_y)
-            mean_score = -np.mean(scores)
-            stdev_score = np.std(scores)
+            mean_score = float(-np.mean(scores))
+            stdev_score = float(np.std(scores))
             
             # Generate predictions
             logger.info("Generating forecast predictions")
@@ -370,10 +374,14 @@ def update_latest_agile():
                 
                 try:
                     for timestamp, row in batch.iterrows():
+                        # Convert numpy types to native Python types explicitly
+                        day_ahead_val = float(row['day_ahead'])
+                        agile_val = float(row['agile'])
+                        
                         price_record = PriceHistory(
                             date_time=timestamp,
-                            day_ahead=row['day_ahead'],
-                            agile=row['agile']
+                            day_ahead=day_ahead_val,
+                            agile=agile_val
                         )
                         db.add(price_record)
                     
@@ -472,13 +480,15 @@ def update_national_agile():
                     ).first()
                     
                     if not existing:
+                        # Convert numpy types to native Python floats
+                        agile_pred = float(row['agile_pred'])
                         agile_record = AgileData(
                             forecast_id=int(forecast_id),
                             date_time=timestamp,
                             region="X",
-                            agile_pred=row['agile_pred'],
-                            agile_low=row['agile_pred'] * 0.95,  # Conservative bounds
-                            agile_high=row['agile_pred'] * 1.05
+                            agile_pred=agile_pred,
+                            agile_low=agile_pred * 0.95,  # Conservative bounds
+                            agile_high=agile_pred * 1.05
                         )
                         db.add(agile_record)
                         records_added += 1
@@ -554,12 +564,15 @@ def _import_price_history(db: Session, price_history_df: pd.DataFrame) -> int:
     Returns:
         Number of records added
     """
+    # Convert numpy types to native Python types
+    df = price_history_df.copy()
+    
     existing_timestamps = set(
         timestamp.date_time 
         for timestamp in db.query(PriceHistory.date_time).all()
     )
-    new_records_df = price_history_df.drop(
-        [timestamp for timestamp in price_history_df.index if timestamp in existing_timestamps]
+    new_records_df = df.drop(
+        [timestamp for timestamp in df.index if timestamp in existing_timestamps]
     )
     
     records_added = 0
@@ -596,8 +609,13 @@ def _import_forecast_data(
         Number of records added
     """
     records_added = 0
-    related_data_df = forecast_data_df[
-        forecast_data_df["forecast_id"] == hdf_forecast_id
+    df = forecast_data_df.copy()
+    
+    # Convert float columns to native Python types
+    float_cols = ["day_ahead", "bm_wind", "solar", "emb_wind", "temp_2m", "wind_10m", "rad", "demand"]
+    
+    related_data_df = df[
+        df["forecast_id"] == hdf_forecast_id
     ].set_index("date_time")
     
     for timestamp, row in related_data_df.iterrows():
@@ -608,17 +626,23 @@ def _import_forecast_data(
             ).first()
             
             if not existing_record:
+                # Convert numpy types to native Python floats
+                def get_float(val):
+                    if val is None or (isinstance(val, float) and np.isnan(val)):
+                        return None
+                    return float(val) if val is not None else None
+                
                 forecast_data = ForecastData(
                     forecast_id=forecast.id,
                     date_time=timestamp,
-                    day_ahead=float(row.get("day_ahead")) if row.get("day_ahead") is not None else None,
-                    bm_wind=float(row.get("bm_wind")) if row.get("bm_wind") is not None else None,
-                    solar=float(row.get("solar")) if row.get("solar") is not None else None,
-                    emb_wind=float(row.get("emb_wind")) if row.get("emb_wind") is not None else None,
-                    temp_2m=float(row.get("temp_2m")) if row.get("temp_2m") is not None else None,
-                    wind_10m=float(row.get("wind_10m")) if row.get("wind_10m") is not None else None,
-                    rad=float(row.get("rad")) if row.get("rad") is not None else None,
-                    demand=float(row.get("demand")) if row.get("demand") is not None else None
+                    day_ahead=get_float(row.get("day_ahead")),
+                    bm_wind=get_float(row.get("bm_wind")),
+                    solar=get_float(row.get("solar")),
+                    emb_wind=get_float(row.get("emb_wind")),
+                    temp_2m=get_float(row.get("temp_2m")),
+                    wind_10m=get_float(row.get("wind_10m")),
+                    rad=get_float(row.get("rad")),
+                    demand=get_float(row.get("demand"))
                 )
                 db.add(forecast_data)
                 records_added += 1
@@ -646,8 +670,13 @@ def _import_agile_data(
         Number of records added
     """
     records_added = 0
-    related_agile_df = agile_data_df[
-        agile_data_df["forecast_id"] == hdf_forecast_id
+    df = agile_data_df.copy()
+    
+    # Convert float columns to native Python types
+    float_cols = ["agile_pred", "agile_low", "agile_high"]
+    
+    related_agile_df = df[
+        df["forecast_id"] == hdf_forecast_id
     ].set_index("date_time")
     
     if len(related_agile_df) == 0:
@@ -663,13 +692,19 @@ def _import_agile_data(
                 ).first()
                 
                 if not existing_record:
+                    # Convert numpy types to native Python floats
+                    def get_float(val):
+                        if val is None or (isinstance(val, float) and np.isnan(val)):
+                            return None
+                        return float(val) if val is not None else None
+                    
                     agile_data = AgileData(
                         forecast_id=forecast.id,
                         date_time=timestamp,
                         region=region,
-                        agile_pred=float(row.get("agile_pred")) if row.get("agile_pred") is not None else None,
-                        agile_low=float(row.get("agile_low")) if row.get("agile_low") is not None else None,
-                        agile_high=float(row.get("agile_high")) if row.get("agile_high") is not None else None
+                        agile_pred=get_float(row.get("agile_pred")),
+                        agile_low=get_float(row.get("agile_low")),
+                        agile_high=get_float(row.get("agile_high"))
                     )
                     db.add(agile_data)
                     records_added += 1

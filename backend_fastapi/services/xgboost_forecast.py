@@ -563,8 +563,8 @@ def save_forecast_to_db(
         # Create forecast record
         forecast = Forecast(
             name=forecast_name,
-            mean=mean_score,
-            stdev=stdev_score,
+            mean=float(mean_score),
+            stdev=float(stdev_score),
             created_at=pd.Timestamp.now(tz="GB")
         )
         db.add(forecast)
@@ -576,31 +576,48 @@ def save_forecast_to_db(
         # Save forecast data
         fc_cols = ["bm_wind", "solar", "emb_wind", "temp_2m", "wind_10m", "rad", "demand", "day_ahead", "day_ahead_low", "day_ahead_high"]
         for timestamp, row in fc[fc_cols].iterrows():
+            # Helper function to convert numpy types to native Python floats
+            def get_float(val):
+                if val is None:
+                    return None
+                if isinstance(val, float) and np.isnan(val):
+                    return None
+                return float(val)
+            
+            day_ahead_val = get_float(row["day_ahead"])
             forecast_data = ForecastData(
                 forecast_id=forecast_id,
                 date_time=timestamp,
-                day_ahead=row["day_ahead"],
-                day_ahead_low=row.get("day_ahead_low", row["day_ahead"] * 0.9),
-                day_ahead_high=row.get("day_ahead_high", row["day_ahead"] * 1.1),
-                bm_wind=row["bm_wind"],
-                solar=row["solar"],
-                emb_wind=row["emb_wind"],
-                temp_2m=row["temp_2m"],
-                wind_10m=row["wind_10m"],
-                rad=row["rad"],
-                demand=row["demand"]
+                day_ahead=day_ahead_val,
+                day_ahead_low=get_float(row.get("day_ahead_low")) or (day_ahead_val * 0.9 if day_ahead_val else None),
+                day_ahead_high=get_float(row.get("day_ahead_high")) or (day_ahead_val * 1.1 if day_ahead_val else None),
+                bm_wind=get_float(row["bm_wind"]),
+                solar=get_float(row["solar"]),
+                emb_wind=get_float(row["emb_wind"]),
+                temp_2m=get_float(row["temp_2m"]),
+                wind_10m=get_float(row["wind_10m"]),
+                rad=get_float(row["rad"]),
+                demand=get_float(row["demand"])
             )
             db.add(forecast_data)
         
         # Save agile data
         for timestamp, row in ag.iterrows():
+            # Helper function to convert numpy types to native Python floats
+            def get_float(val):
+                if val is None:
+                    return None
+                if isinstance(val, float) and np.isnan(val):
+                    return None
+                return float(val)
+            
             agile_data = AgileData(
                 forecast_id=forecast_id,
                 date_time=timestamp,
-                region=row["region"],
-                agile_pred=row["agile_pred"],
-                agile_low=row["agile_low"],
-                agile_high=row["agile_high"]
+                region=str(row["region"]),
+                agile_pred=get_float(row["agile_pred"]),
+                agile_low=get_float(row["agile_low"]),
+                agile_high=get_float(row["agile_high"])
             )
             db.add(agile_data)
         
