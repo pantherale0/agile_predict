@@ -356,56 +356,59 @@ def update_latest_agile():
             start = prices.index[-1] + pd.Timedelta("30min")
         
         logger.info(f"Historical prices loaded. Starting from {start}")
-        
-        # Fetch new Agile prices
-        agile = get_agile(start=start)
-        day_ahead = day_ahead_to_agile(agile, reverse=True)
-        
-        new_prices = pd.concat([day_ahead, agile], axis=1)
-        if len(prices) > 0:
-            new_prices = new_prices[new_prices.index > prices.index[-1]]
-        
-        if len(new_prices) > 0:
-            logger.info(f"Found {len(new_prices)} new price records to add")
+        # Loop for each region
+        for region in AGILE_REGIONS.keys():
+            logger.info(f"Updating Agile prices for region {region}")
+            # Fetch new Agile prices
+            agile = get_agile(start=start, region=region)
+            day_ahead = day_ahead_to_agile(agile, reverse=True)
             
-            # Convert timezone-aware index to UTC for storage
-            if new_prices.index.tz is not None:
-                utc_index = new_prices.index.tz_convert('UTC')
-                new_prices.index = utc_index
-                logger.info("Converted Europe/London timezone data to UTC")
+            new_prices = pd.concat([day_ahead, agile], axis=1)
+            if len(prices) > 0:
+                new_prices = new_prices[new_prices.index > prices.index[-1]]
             
-            # Add records in batches
-            batch_size = 500
-            total_added = 0
-            
-            for i in range(0, len(new_prices), batch_size):
-                batch = new_prices.iloc[i:i+batch_size]
+            if len(new_prices) > 0:
+                logger.info(f"Found {len(new_prices)} new price records to add")
                 
-                try:
-                    for timestamp, row in batch.iterrows():
-                        # Convert numpy types to native Python types explicitly
-                        day_ahead_val = float(row['day_ahead'])
-                        agile_val = float(row['agile'])
-                        
-                        price_record = PriceHistory(
-                            date_time=timestamp,
-                            day_ahead=day_ahead_val,
-                            agile=agile_val
-                        )
-                        db.add(price_record)
+                # Convert timezone-aware index to UTC for storage
+                if new_prices.index.tz is not None:
+                    utc_index = new_prices.index.tz_convert('UTC')
+                    new_prices.index = utc_index
+                    logger.info("Converted Europe/London timezone data to UTC")
+                
+                # Add records in batches
+                batch_size = 500
+                total_added = 0
+                
+                for i in range(0, len(new_prices), batch_size):
+                    batch = new_prices.iloc[i:i+batch_size]
                     
-                    db.commit()
-                    total_added += len(batch)
-                    logger.info(f"Batch {i//batch_size + 1}: Added {len(batch)} records ({total_added} total)")
-                except Exception as e:
-                    logger.error(f"Error in batch {i//batch_size + 1}: {e}")
-                    db.rollback()
-                    raise
+                    try:
+                        for timestamp, row in batch.iterrows():
+                            # Convert numpy types to native Python types explicitly
+                            day_ahead_val = float(row['day_ahead'])
+                            agile_val = float(row['agile'])
+                            
+                            price_record = PriceHistory(
+                                date_time=timestamp,
+                                day_ahead=day_ahead_val,
+                                agile=agile_val,
+                                region=region
+                            )
+                            db.add(price_record)
+                        
+                        db.commit()
+                        total_added += len(batch)
+                        logger.info(f"Batch {i//batch_size + 1}: Added {len(batch)} records ({total_added} total)")
+                    except Exception as e:
+                        logger.error(f"Error in batch {i//batch_size + 1}: {e}")
+                        db.rollback()
+                        raise
+                
+                logger.info(f"Successfully added {total_added} new price records")
+            else:
+                logger.info("No new price records found")
             
-            logger.info(f"Successfully added {total_added} new price records")
-        else:
-            logger.info("No new price records found")
-        
         job_status["last_latest_agile"] = datetime.now()
         job_status["last_latest_agile_error"] = None
         log_task_execution("update_latest_agile", "Update Latest Agile Prices", "success")

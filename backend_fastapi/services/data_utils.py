@@ -26,22 +26,25 @@ RETRY_CODES = [
 ]
 
 # UK Agile pricing regions mapping with conversion factors
+# Formula: min(D × W + P, 95)
+# D = distribution coefficient (÷10 to convert from £ to pence), W = wholesale price (p/kWh), 
+# P = peak-time premium in pence (4pm-7pm only)
 REGIONS = {
-    'X': {'name': 'National Average', 'factors': (0.2136, 12.21)},
+    'X': {'name': 'National Average', 'factors': (0.216, 12.21)},
     'A': {'name': 'Eastern England', 'factors': (0.21, 13)},
     'B': {'name': 'East Midlands', 'factors': (0.20, 14)},
-    'C': {'name': 'London', 'factors': (0.22, 12)},
-    'D': {'name': 'Merseyside and Northern Wales', 'factors': (0.21, 13)},
-    'E': {'name': 'West Midlands', 'factors': (0.21, 13)},
-    'F': {'name': 'North Eastern England', 'factors': (0.20, 14)},
-    'G': {'name': 'North Western England', 'factors': (0.21, 13)},
-    'H': {'name': 'Southern England', 'factors': (0.22, 12)},
+    'C': {'name': 'London', 'factors': (0.20, 12)},
+    'D': {'name': 'Merseyside and Northern Wales', 'factors': (0.22, 13)},
+    'E': {'name': 'West Midlands', 'factors': (0.21, 12)},
+    'F': {'name': 'North Eastern England', 'factors': (0.21, 12)},
+    'G': {'name': 'North Western England', 'factors': (0.21, 12)},
+    'H': {'name': 'Southern England', 'factors': (0.21, 12)},
     'J': {'name': 'South Eastern England', 'factors': (0.22, 12)},
-    'K': {'name': 'Southern Wales', 'factors': (0.21, 13)},
-    'L': {'name': 'South Western England', 'factors': (0.21, 13)},
-    'M': {'name': 'Yorkshire', 'factors': (0.20, 14)},
-    'N': {'name': 'Southern Scotland', 'factors': (0.20, 14)},
-    'P': {'name': 'Northern Scotland', 'factors': (0.19, 15)},
+    'K': {'name': 'Southern Wales', 'factors': (0.22, 12)},
+    'L': {'name': 'South Western England', 'factors': (0.23, 11)},
+    'M': {'name': 'Yorkshire', 'factors': (0.20, 13)},
+    'N': {'name': 'Southern Scotland', 'factors': (0.21, 13)},
+    'P': {'name': 'Northern Scotland', 'factors': (0.24, 12)},
 }
 
 
