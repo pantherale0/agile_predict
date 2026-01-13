@@ -27,32 +27,6 @@
       "label": "Start Frontend Dev Server",
       "type": "shell",
       "command": "bash",
-      "args": ["-c", "cd ${workspaceFolder}/frontend && bash generate-config.sh && npm start"],
-      "isBackground": true,
-      "problemMatcher": {
-        "pattern": {
-          "regexp": "^.*$",
-          "file": 1,
-          "location": 2,
-          "message": 3
-        },
-        "background": {
-          "activeOnStart": true,
-          "beginsPattern": "^Compiled successfully!",
-          "endsPattern": "^webpack.*"
-        }
-      },
-      "presentation": {
-        "echo": true,
-        "reveal": "always",
-        "focus": false,
-        "panel": "shared"
-      }
-    },
-    {
-      "label": "Start Frontend Dev Server (with API)",
-      "type": "shell",
-      "command": "bash",
       "args": ["-c", "cd ${workspaceFolder}/frontend && REACT_APP_API_URL='${input:apiUrl}' bash generate-config.sh && npm start"],
       "isBackground": true,
       "problemMatcher": {
@@ -74,23 +48,6 @@
         "focus": false,
         "panel": "shared"
       }
-    },
-    {
-      "label": "Stop Frontend Dev Server",
-      "type": "shell",
-      "command": "pkill",
-      "args": ["-f", "react-scripts start"],
-      "windows": {
-        "command": "taskkill",
-        "args": ["/IM", "node.exe", "/F"]
-      },
-      "presentation": {
-        "echo": true,
-        "reveal": "silent",
-        "focus": false,
-        "panel": "shared"
-      },
-      "problemMatcher": []
     },
     {
       "label": "Install Backend Dependencies",
@@ -242,24 +199,6 @@
         "reveal": "always",
         "focus": false,
         "panel": "shared"
-      }
-    },
-    {
-      "label": "Run Backend Tests",
-      "type": "shell",
-      "command": "${workspaceFolder}/.venv/bin/python",
-      "args": ["manage.py", "test"],
-      "cwd": "${workspaceFolder}/backend",
-      "problemMatcher": [],
-      "presentation": {
-        "echo": true,
-        "reveal": "always",
-        "focus": false,
-        "panel": "shared"
-      },
-      "env": {
-        "PYTHONUNBUFFERED": "1",
-        "VIRTUAL_ENV": "${workspaceFolder}/.venv"
       }
     }
   ]

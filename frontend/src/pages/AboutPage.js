@@ -3,9 +3,6 @@ import React from 'react';
 function AboutPage() {
   return (
     <div className="container-lg">
-      <div className="row bg-body text-center py-4">
-        <h2>About AgilePredict</h2>
-      </div>
       <div className="row">
         <div className="col-lg-8 offset-lg-2">
           <div className="card mb-4">

@@ -1,0 +1,31 @@
+@import url('https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css');
+
+.forecast-options {
+  padding: 1rem 0;
+}
+
+.forecast-options-modal {
+  padding: 0;
+}
+
+.forecast-form .accordion-button::before {
+  margin-right: 0.5rem;
+}
+
+.forecast-form .accordion-button i {
+  margin-right: 0.5rem;
+}
+
+.forecast-form .form-check-label i {
+  margin-right: 0.5rem;
+  color: #0d6efd;
+}
+
+.forecast-form .form-label i {
+  margin-right: 0.5rem;
+  color: #0d6efd;
+}
+
+.forecast-form .btn-primary i {
+  margin-right: 0.5rem;
+}

@@ -55,6 +55,7 @@ class PriceHistory(Base):
     date_time = Column(DateTime, unique=True, index=True)
     day_ahead = Column(Float)
     agile = Column(Float)
+    region = Column(String(1), index=True)
 
 
 class AgileData(Base):

@@ -15,12 +15,7 @@ function StatsPage() {
     fetchStats()
       .then(res => {
         console.log('Stats data received:', res.data);
-        // Handle paginated response structure
-        const data = Array.isArray(res.data.results) && res.data.results.length > 0 
-          ? res.data.results[0] 
-          : res.data;
-        console.log('Extracted stats:', data);
-        setStatsData(data);
+        setStatsData(res.data);
         setLoading(false);
       })
       .catch(err => {
@@ -31,159 +26,132 @@ function StatsPage() {
   }, []);
 
   if (loading) {
-    return <div className="alert alert-info">Loading stats...</div>;
+    return (
+      <div className="container-fluid stats-page">
+        <div className="stats-container">
+          <div className="alert alert-info">
+            <span className="spinner-border spinner-border-sm me-2"></span>
+            Loading model performance statistics...
+          </div>
+        </div>
+      </div>
+    );
   }
 
   if (error) {
-    return <div className="alert alert-danger">Error: {error}</div>;
+    return (
+      <div className="container-fluid stats-page">
+        <div className="stats-container">
+          <div className="alert alert-danger">
+            <strong>Error:</strong> {error}
+          </div>
+        </div>
+      </div>
+    );
   }
 
-  if (!statsData || (!statsData.stats_chart && !statsData.message)) {
-    return <div className="alert alert-warning">No stats available</div>;
+  if (!statsData || (!statsData.stats_chart && statsData.message)) {
+    return (
+      <div className="container-fluid stats-page">
+        <div className="stats-container">
+          <h1 className="stats-title">Model Performance Statistics</h1>
+          <div className="alert alert-warning">
+            {statsData?.message || 'No statistics data available yet.'}
+          </div>
+        </div>
+      </div>
+    );
   }
 
-  // Safely access nested properties
   const statsChart = statsData?.stats_chart;
   const trendImage = statsData?.trend_image;
   const diagnosticPlots = statsData?.diagnostic_plots || [];
 
   return (
-    <div className="container-lg fluid">
-      <div className="row">
-        <div className="col-lg p-4">
-          <h2 className="mb-4">Model Performance Statistics</h2>
-          
-          {statsData.message && (
-            <div className="alert alert-info mb-4">{statsData.message}</div>
-          )}
+    <div className="container-fluid stats-page">
+      <div className="stats-container">
+        <h1 className="stats-title">Model Performance Statistics</h1>
 
-          {/* Stats Chart Section */}
-          {statsChart && statsChart.data && statsChart.layout ? (
-            <div className="stats-section mt-5">
-              <h4 className="mb-4">Price History Chart</h4>
-              <p className="text-muted">
-                This chart shows the actual Agile prices and Day-Ahead prices over the selected period.
-              </p>
-              <div className="row mt-3">
-                <Plot
-                  data={statsChart.data}
-                  layout={statsChart.layout}
-                  config={{ scrollZoom: true, responsive: true }}
-                  style={{ width: '100%' }}
-                  useResizeHandler
-                />
-              </div>
+        {/* Price History and Error Heatmap Section */}
+        {statsChart && statsChart.data && statsChart.layout ? (
+          <section className="stats-section">
+            <h2 className="section-title">Agile Price Forecasts and Error Analysis</h2>
+            <p className="section-description">
+              The chart below shows the actual Agile prices (yellow line) over the last 7 days along with forecasts made at different times (grey lines).
+              The heatmap below shows the absolute error for each forecast as a function of the forecast age and date.
+            </p>
+            <div className="chart-container">
+              <Plot
+                data={statsChart.data}
+                layout={statsChart.layout}
+                config={{ 
+                  scrollZoom: true, 
+                  responsive: true,
+                  displayModeBar: true,
+                  displaylogo: false
+                }}
+                style={{ width: '100%', height: '100%' }}
+                useResizeHandler
+              />
             </div>
-          ) : (
-            <div className="alert alert-warning">No price chart data available</div>
-          )}
+          </section>
+        ) : null}
 
-          {/* Trend Section */}
-          {trendImage && (
-            <div className="stats-section mt-5">
-              <h4 className="mb-4">Model RMS Error and Robustness vs Forecast Date</h4>
-              <p className="text-muted">
-                This plot shows how the model fit to the training data and its robustness evolve over time as more
-                points are included.
-              </p>
-              <p className="text-muted">
-                The model is trained five times using 80% of the data to train and the other 20% to test. Each iteration
-                gives an RMS error for the fit. The mean of the five plotted as the black line and the range (as +/- 1
-                standard deviation) is the pale yellow range. As more data is added the model should learn and so the
-                absolute error should trend downwards and the range should narrow.
-              </p>
-              <div className="row mt-3">
-                <img 
-                  src={trendImage} 
-                  alt="Trend" 
-                  className="trend-image"
-                />
-              </div>
+        {/* Trend Analysis Section */}
+        {trendImage && (
+          <section className="stats-section">
+            <h2 className="section-title">Model Robustness Analysis</h2>
+            <p className="section-description">
+              This plot shows how the model's accuracy (RMS Error) and robustness evolve over time as more data points are included in the training dataset.
+            </p>
+            <p className="section-description">
+              The model is trained five times using 80% of the data for training and 20% for testing. Each iteration produces an RMS error for the model fit.
+              The black line represents the mean error across these five iterations, while the pale yellow range shows ±1 standard deviation.
+              As more data is added, the model should learn and improve, with the absolute error trending downwards and the uncertainty range narrowing.
+            </p>
+            <div className="image-container">
+              <img 
+                src={trendImage} 
+                alt="Model RMS Error and Robustness vs Forecast Date" 
+                className="trend-image"
+              />
             </div>
-          )}
+          </section>
+        )}
 
-          {/* Summary Statistics Section */}
-          {statsData.summary_stats && (
-            <div className="stats-section mt-5">
-              <h4 className="mb-4">Summary Statistics</h4>
-              <div className="row">
-                {statsData.summary_stats.agile && (
-                  <div className="col-md-6 mb-4">
-                    <div className="card bg-dark border-secondary">
-                      <div className="card-body">
-                        <h5 className="card-title text-light">Agile Pricing Stats</h5>
-                        <ul className="list-unstyled text-muted">
-                          <li><strong>Min:</strong> £{statsData.summary_stats.agile.min?.toFixed(2) || 'N/A'}</li>
-                          <li><strong>Max:</strong> £{statsData.summary_stats.agile.max?.toFixed(2) || 'N/A'}</li>
-                          <li><strong>Mean:</strong> £{statsData.summary_stats.agile.mean?.toFixed(2) || 'N/A'}</li>
-                          <li><strong>Median:</strong> £{statsData.summary_stats.agile.median?.toFixed(2) || 'N/A'}</li>
-                          <li><strong>Std Dev:</strong> £{statsData.summary_stats.agile.std?.toFixed(2) || 'N/A'}</li>
-                        </ul>
-                      </div>
-                    </div>
+        {/* Diagnostic Plots Section */}
+        {diagnosticPlots.length > 0 && (
+          <section className="stats-section">
+            <h2 className="section-title">Model Diagnostic Plots</h2>
+            <p className="section-description">
+              The following plots provide detailed analysis of the most recent forecast model's performance and characteristics.
+            </p>
+
+            <div className="diagnostic-grid">
+              {diagnosticPlots.map((plot, index) => (
+                <div 
+                  key={index}
+                  className={`diagnostic-card ${index === 0 ? 'full-width' : ''}`}
+                >
+                  <div className="diagnostic-header">
+                    <h3 className="diagnostic-title">{plot.title}</h3>
                   </div>
-                )}
-                {statsData.summary_stats.day_ahead && (
-                  <div className="col-md-6 mb-4">
-                    <div className="card bg-dark border-secondary">
-                      <div className="card-body">
-                        <h5 className="card-title text-light">Day-Ahead Pricing Stats</h5>
-                        <ul className="list-unstyled text-muted">
-                          <li><strong>Min:</strong> £{statsData.summary_stats.day_ahead.min?.toFixed(2) || 'N/A'}</li>
-                          <li><strong>Max:</strong> £{statsData.summary_stats.day_ahead.max?.toFixed(2) || 'N/A'}</li>
-                          <li><strong>Mean:</strong> £{statsData.summary_stats.day_ahead.mean?.toFixed(2) || 'N/A'}</li>
-                          <li><strong>Median:</strong> £{statsData.summary_stats.day_ahead.median?.toFixed(2) || 'N/A'}</li>
-                          <li><strong>Std Dev:</strong> £{statsData.summary_stats.day_ahead.std?.toFixed(2) || 'N/A'}</li>
-                        </ul>
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* Forecast Accuracy Section */}
-          {statsData.forecast_accuracy && (
-            <div className="stats-section mt-5">
-              <h4 className="mb-4">Forecast Accuracy</h4>
-              <div className="card bg-dark border-secondary">
-                <div className="card-body">
-                  <ul className="list-unstyled text-muted">
-                    <li><strong>RMSE:</strong> {statsData.forecast_accuracy.rmse?.toFixed(2) || 'N/A'}</li>
-                    <li><strong>MAE:</strong> {statsData.forecast_accuracy.mae?.toFixed(2) || 'N/A'}</li>
-                    <li><strong>MAPE:</strong> {statsData.forecast_accuracy.mape?.toFixed(2) || 'N/A'}%</li>
-                    <li><strong>Forecast Date:</strong> {statsData.forecast_accuracy.forecast_date || 'N/A'}</li>
-                    <li><strong>Samples:</strong> {statsData.forecast_accuracy.samples || 'N/A'}</li>
-                  </ul>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Diagnostic Plots Section */}
-          {statsData.diagnostic_plots && statsData.diagnostic_plots.length > 0 && (
-            <div className="stats-section mt-5">
-              <h4 className="mb-4">Model Diagnostic Plots - Most Recent Forecast</h4>
-              <div className="row">
-                {statsData.diagnostic_plots.map((plot, index) => (
-                  <div 
-                    key={index}
-                    className={index === 0 ? "col-lg-12 mb-4" : "col-md-6 mb-4"}
-                  >
-                    <h5 className="text-light">{plot.title}</h5>
-                    <p className="text-muted">{plot.description}</p>
+                  <p className="diagnostic-description">
+                    {plot.description}
+                  </p>
+                  <div className="diagnostic-image-wrapper">
                     <img
                       src={`/static/${plot.filename}`}
                       className="diagnostic-image"
-                      alt={plot.filename}
+                      alt={plot.title}
+                      loading="lazy"
                     />
                   </div>
-                ))}
-              </div>
+                </div>
+              ))}
             </div>
-          )}
-        </div>
+          </section>
+        )}
       </div>
     </div>
   );

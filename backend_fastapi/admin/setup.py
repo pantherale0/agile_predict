@@ -9,6 +9,7 @@ from core.config import settings
 from core.auth import oidc_provider
 from admin.auth import OAuth2AuthBackend
 import logging
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -83,8 +84,19 @@ def setup_admin(app: FastAPI):
         # Add redirect middleware for unauthenticated access
         app.add_middleware(AdminAuthMiddleware)
     
-    # Create admin instance (no login_view parameter)
-    admin = Admin(engine=engine, title="AgilePredictAPI Admin")
+    # Setup templates directory with custom templates
+    custom_templates_dir = Path(__file__).parent.parent / "templates"
+    
+    # Create admin instance with templates directory
+    admin = Admin(
+        engine=engine,
+        title="AgilePredictAPI Admin",
+        templates_dir=str(custom_templates_dir),
+    )
+    
+    # Add get_locale function to the existing template environment
+    # This allows custom and built-in starlette_admin templates to use get_locale()
+    admin.templates.env.globals['get_locale'] = lambda: "en"
     
     # Register custom views (non-model views)
     admin.add_view(SchedulerInfoView())

@@ -22,21 +22,22 @@ axios.interceptors.request.use(
   error => Promise.reject(error)
 );
 
-export const fetchRegionalForecast = (region, days = 14) => {
-  return axios.get(`${getAPIBase()}/forecasts/${region}`, {
+export const fetchAvailableForecasts = (count = 10) => {
+  return axios.get(`${getAPIBase()}/forecasts/`, {
+    params: { count }
+  });
+}
+
+export const fetchRegionalForecast = (region, days = 7) => {
+  return axios.get(`${getAPIBase()}/forecasts/${region}/latest`, {
     params: {
       days,
-      forecast_count: 1,
       high_low: 'true'
     }
   });
 };
 
-export const fetchLatestForecast = () => {
-  return axios.get(`${getAPIBase()}/forecasts/latest`);
-};
-
-export const fetchGenerationDemand = (region, days = 14) => {
+export const fetchGenerationDemand = (region, days = 7) => {
   return axios.get(`${getAPIBase()}/prices/${region}/generation`, {
     params: {
       days,
@@ -45,7 +46,7 @@ export const fetchGenerationDemand = (region, days = 14) => {
   });
 };
 
-export const fetchActualPrices = (days = 14) => {
+export const fetchActualPrices = (days = 7) => {
   return axios.get(`${getAPIBase()}/prices/history/actual/`, {
     params: { days }
   });
@@ -59,6 +60,6 @@ export const fetchPriceHeatmap = () => {
   return axios.get(`${getAPIBase()}/prices/history/heatmap/`);
 };
 
-export const fetchDailyBreakdown = (dateStr) => {
-  return axios.get(`${getAPIBase()}/prices/history/daily/${dateStr}`);
+export const fetchDailyBreakdown = (dateStr, region) => {
+  return axios.get(`${getAPIBase()}/prices/history/daily/${region}/${dateStr}`);
 };

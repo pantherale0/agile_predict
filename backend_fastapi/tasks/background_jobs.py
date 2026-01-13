@@ -1,7 +1,7 @@
 """Background task definitions for scheduled jobs."""
 import logging
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from sqlalchemy.orm import Session
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -28,21 +28,28 @@ def log_task_execution(job_id: str, job_name: str, status: str, error_message: s
         error_message: Error message if job failed
         duration_seconds: Execution duration in seconds
     """
+    db = None
     try:
         db = SessionLocal()
         task_log = TaskLog(
             job_id=job_id,
             job_name=job_name,
-            started_at=datetime.utcnow(),
+            started_at=datetime.now(timezone.utc),
+            completed_at=datetime.now(timezone.utc),
             status=status,
             error_message=error_message,
             duration_seconds=duration_seconds
         )
         db.add(task_log)
         db.commit()
-        db.close()
+        logger.info(f"Task log recorded: {job_name} ({job_id}) - Status: {status}")
     except Exception as e:
         logger.error(f"Failed to log task execution: {e}")
+        if db:
+            db.rollback()
+    finally:
+        if db:
+            db.close()
 
 # Constants
 # UK Agile pricing regions mapping
@@ -300,11 +307,13 @@ def update_forecasts():
         logger.info(f"Forecast update completed successfully: {forecast.id} - {forecast.name}")
         job_status["last_update"] = datetime.now()
         job_status["last_update_error"] = None
+        log_task_execution("update_forecasts", "Update Forecasts", "success")
         
     except Exception as e:
         logger.error(f"Forecast update failed: {str(e)}", exc_info=True)
         job_status["last_update_error"] = str(e)
         job_status["last_update"] = datetime.now()
+        log_task_execution("update_forecasts", "Update Forecasts", "failed", error_message=str(e))
         if db is not None:
             db.rollback()
     finally:
@@ -399,11 +408,13 @@ def update_latest_agile():
         
         job_status["last_latest_agile"] = datetime.now()
         job_status["last_latest_agile_error"] = None
+        log_task_execution("update_latest_agile", "Update Latest Agile Prices", "success")
         
     except Exception as e:
         logger.error("Latest Agile prices update failed: %s", str(e), exc_info=True)
         job_status["last_latest_agile_error"] = str(e)
         job_status["last_latest_agile"] = datetime.now()
+        log_task_execution("update_latest_agile", "Update Latest Agile Prices", "failed", error_message=str(e))
         db.rollback()
     finally:
         db.close()
@@ -444,54 +455,67 @@ def update_national_agile():
             for fd in forecast_data_list
         ])
         
-        # Set date_time as index and convert to Series for day_ahead_to_agile
-        df.index = pd.to_datetime(df['date_time'])
-        if df.index.tz is None:
-            df.index = df.index.tz_localize("UTC")
+        # Normalize date_time column
+        df['date_time'] = pd.to_datetime(df['date_time'])
+        if df['date_time'].dt.tz is None:
+            df['date_time'] = df['date_time'].dt.tz_localize("UTC")
+        
+        # Group by date_time and take the mean day_ahead value to handle duplicate timestamps
+        # This creates a clean Series without duplicate index labels for day_ahead_to_agile
+        date_time_series = df.groupby('date_time')['day_ahead'].mean()
         
         # Calculate agile predictions for national region (X)
-        day_ahead_series = df["day_ahead"]
-        agile_series = day_ahead_to_agile(day_ahead_series, region="X")
+        agile_series = day_ahead_to_agile(date_time_series, region="X")
         
-        df["agile_pred"] = agile_series
-        df["region"] = "X"
-        
-        logger.info(f"Calculating national Agile data for {df['forecast_id'].nunique()} forecasts")
+        logger.info(f"Calculating national Agile data for {df['forecast_id'].nunique()} forecasts with {len(agile_series)} unique timestamps")
         
         # Process each forecast
         records_added = 0
         for forecast_id in df["forecast_id"].unique():
             try:
+                # Convert numpy.int64 to native Python int for SQLAlchemy compatibility
+                forecast_id = int(forecast_id)
                 forecast_df = df[df["forecast_id"] == forecast_id].copy()
                 
                 # Check if forecast exists
-                forecast = db.query(Forecast).filter(Forecast.id == int(forecast_id)).first()
+                forecast = db.query(Forecast).filter(Forecast.id == forecast_id).first()
                 if not forecast:
                     logger.debug(f"Forecast {forecast_id} not found in database, skipping")
                     continue
                 
-                # Add national Agile data records
+                # Add national Agile data records for this forecast
                 for timestamp, row in forecast_df.iterrows():
                     # Check if record already exists
                     existing = db.query(AgileData).filter(
                         AgileData.forecast_id == forecast_id,
-                        AgileData.date_time == timestamp,
+                        AgileData.date_time == row['date_time'],
                         AgileData.region == "X"
                     ).first()
                     
                     if not existing:
-                        # Convert numpy types to native Python floats
-                        agile_pred = float(row['agile_pred'])
-                        agile_record = AgileData(
-                            forecast_id=int(forecast_id),
-                            date_time=timestamp,
-                            region="X",
-                            agile_pred=agile_pred,
-                            agile_low=agile_pred * 0.95,  # Conservative bounds
-                            agile_high=agile_pred * 1.05
-                        )
-                        db.add(agile_record)
-                        records_added += 1
+                        # Get the agile prediction for this timestamp from the aggregated series
+                        if row['date_time'] in agile_series.index:
+                            agile_pred = float(agile_series[row['date_time']])
+                        else:
+                            # Fallback: calculate from this row's day_ahead value
+                            logger.warning(f"Timestamp {row['date_time']} not found in agile_series, using direct calculation")
+                            from services.data_utils import day_ahead_to_agile
+                            agile_pred = float(day_ahead_to_agile(
+                                pd.Series([row['day_ahead']], index=[row['date_time']]), 
+                                region="X"
+                            )[0]) if row['day_ahead'] else None
+                        
+                        if agile_pred is not None:
+                            agile_record = AgileData(
+                                forecast_id=forecast_id,
+                                date_time=row['date_time'],
+                                region="X",
+                                agile_pred=agile_pred,
+                                agile_low=agile_pred * 0.95,  # Conservative bounds
+                                agile_high=agile_pred * 1.05
+                            )
+                            db.add(agile_record)
+                            records_added += 1
                 
             except Exception as e:
                 logger.error(f"Error processing forecast {forecast_id} for national Agile: {str(e)}", exc_info=True)
@@ -502,11 +526,13 @@ def update_national_agile():
         
         job_status["last_national_agile"] = datetime.now()
         job_status["last_national_agile_error"] = None
+        log_task_execution("update_national_agile", "Update National Agile Data", "success")
         
     except Exception as e:
         logger.error("National Agile data update failed: %s", str(e), exc_info=True)
         job_status["last_national_agile_error"] = str(e)
         job_status["last_national_agile"] = datetime.now()
+        log_task_execution("update_national_agile", "Update National Agile Data", "failed", error_message=str(e))
         db.rollback()
     finally:
         db.close()
@@ -544,11 +570,13 @@ def clean_old_forecasts():
         
         job_status["last_clean"] = datetime.now()
         job_status["last_clean_error"] = None
+        log_task_execution("clean_forecasts", "Clean Old Forecasts", "success")
         
     except Exception as e:
         logger.error("Forecast cleanup failed: %s", str(e))
         job_status["last_clean_error"] = str(e)
         job_status["last_clean"] = datetime.now()
+        log_task_execution("clean_forecasts", "Clean Old Forecasts", "failed", error_message=str(e))
         db.rollback()
     finally:
         db.close()
@@ -803,11 +831,13 @@ def sync_local_data():
         
         job_status["last_sync_local"] = datetime.now()
         job_status["last_sync_local_error"] = None
+        log_task_execution("sync_local_data", "Sync Local Data", "success")
         
     except Exception as e:
         logger.error(f"Local data sync failed: {str(e)}")
         job_status["last_sync_local_error"] = str(e)
         job_status["last_sync_local"] = datetime.now()
+        log_task_execution("sync_local_data", "Sync Local Data", "failed", error_message=str(e))
         try:
             db.rollback()
         except Exception:

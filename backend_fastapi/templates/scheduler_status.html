@@ -1,0 +1,92 @@
+{% extends "layout.html" %}
+
+{% block header %}
+<h1>Scheduler Status</h1>
+{% endblock %}
+
+
+{% block content %}
+    <div class="container-fluid">    
+        <p>Status: <span class="status-badge">{% if running %}🟢 Running{% else %}🔴 Stopped{% endif %}</span></p>
+        
+        <h3 style="margin-top: 30px;">📋 Scheduled Jobs</h3>
+        {% if jobs %}
+        <table class="table table-striped table-hover">
+            <thead class="table-dark">
+                <tr>
+                    <th style="width: 150px;">Job ID</th>
+                    <th style="width: 200px;">Job Name</th>
+                    <th>Trigger</th>
+                    <th>Next Run</th>
+                    <th style="width: 150px;">Action</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for job in jobs %}
+                <tr>
+                    <td><code>{{ job.id }}</code></td>
+                    <td><strong>{{ job.name }}</strong></td>
+                    <td><small>{{ job.get('trigger', 'N/A') }}</small></td>
+                    <td><small>{{ job.get('next_run_time', 'N/A') }}</small></td>
+                    <td>
+                        <button type="button" onclick="triggerJob('{{ job.id }}')" class="btn btn-sm btn-primary">
+                            Trigger Now
+                        </button>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p class="alert alert-info">No scheduled jobs found.</p>
+        {% endif %}
+        
+        <hr>
+        <p class="text-muted"><small>💡 Click "Trigger Now" to manually execute a job immediately.</small></p>
+    </div>
+    
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@4.6.0/dist/js/bootstrap.min.js"></script>
+    <script>
+        function getAccessToken() {
+            const cookies = document.cookie.split(';');
+            for (let cookie of cookies) {
+                const [name, value] = cookie.trim().split('=');
+                if (name === 'access_token') {
+                    return decodeURIComponent(value);
+                }
+            }
+            return null;
+        }
+        
+        function triggerJob(jobId) {
+            if (!confirm(`Trigger job: ${jobId}?`)) return;
+            
+            const token = getAccessToken();
+            const headers = {'Content-Type': 'application/json'};
+            if (token) {
+                headers['Authorization'] = `Bearer ${token}`;
+            }
+            
+            fetch(`/api/tasks/jobs/${jobId}/trigger`, {
+                method: 'POST',
+                headers: headers,
+                credentials: 'include'
+            })
+            .then(r => {
+                if (!r.ok) throw new Error(`HTTP ${r.status}`);
+                return r.json();
+            })
+            .then(data => {
+                const msg = data.success 
+                    ? `✅ Success: ${data.message}`
+                    : `❌ Error: ${data.message}`;
+                alert(msg);
+                setTimeout(() => location.reload(), 1000);
+            })
+            .catch(e => {
+                alert(`❌ Error: ${e.message}`);
+            });
+        }
+    </script>
+{% endblock %}

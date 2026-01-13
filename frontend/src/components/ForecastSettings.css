@@ -1,0 +1,41 @@
+@import url('https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css');
+
+/* Hide on mobile, show on desktop in navbar */
+.forecast-settings-btn {
+  color: #0d6efd;
+  font-size: 1.25rem;
+  padding: 0.5rem 1rem !important;
+  border: none;
+  background: none;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: color 0.2s ease, transform 0.2s ease;
+  margin-left: auto;
+}
+
+/* Show on desktop (lg and up) */
+@media (min-width: 992px) {
+  .forecast-settings-btn {
+    display: flex;
+  }
+}
+
+.forecast-settings-btn:hover {
+  color: #0b5ed7;
+  transform: rotate(90deg);
+}
+
+.forecast-settings-btn:focus {
+  outline: none;
+  box-shadow: 0 0 0 0.2rem rgba(13, 110, 253, 0.25);
+}
+
+.forecast-settings-modal {
+  z-index: 1050;
+}
+
+.forecast-settings-modal .modal-dialog {
+  margin-top: 2rem;
+}

@@ -7,7 +7,7 @@ import logging
 from core.config import settings
 from core.security import add_cors_middleware, add_trusted_host_middleware, add_proxy_headers_middleware
 from core.auth import get_current_user, User, oidc_provider
-from core.database import engine
+from core.database import engine, SessionLocal
 from models import Base
 from api.endpoints import forecasts, price_history, tasks
 from tasks.scheduler import start_scheduler, stop_scheduler, get_scheduler_status
@@ -20,6 +20,38 @@ logger = logging.getLogger(__name__)
 
 # Create tables
 Base.metadata.create_all(bind=engine)
+
+# Apply database migrations
+def run_migrations():
+    """Apply any pending database migrations."""
+    db = SessionLocal()
+    try:
+        from sqlalchemy import text, inspect
+        
+        # Migration 1: Add region column to forecasting_pricehistory if it doesn't exist
+        inspector = inspect(engine)
+        columns = [c['name'] for c in inspector.get_columns('forecasting_pricehistory')]
+        
+        if 'region' not in columns:
+            logger.info("Applying migration: Adding region column to forecasting_pricehistory")
+            db.execute(text("""
+                ALTER TABLE forecasting_pricehistory
+                ADD COLUMN region VARCHAR(1)
+            """))
+            db.commit()
+            logger.info("✓ Migration applied: region column added to forecasting_pricehistory")
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Migration failed: {e}")
+        raise
+    finally:
+        db.close()
+
+try:
+    run_migrations()
+except Exception as e:
+    logger.error(f"Failed to run migrations during startup: {e}")
+    raise
 
 
 @asynccontextmanager
@@ -58,218 +90,6 @@ register_admin_models(admin)
 async def health_check():
     """Health check endpoint - Public endpoint."""
     return JSONResponse({"status": "healthy", "version": settings.PROJECT_VERSION})
-
-
-# Scheduler Status Page
-@app.get("/scheduler-status", response_class=HTMLResponse, include_in_schema=False)
-async def scheduler_status_page():
-    """Display scheduler status page with trigger buttons.
-    
-    Client-side OAuth2 authentication via localStorage token.
-    """
-    # Return HTML with client-side auth check
-    return _get_scheduler_status_html()
-
-
-def _get_scheduler_status_html():
-    """Generate HTML with client-side OAuth2 auth check."""
-    status = get_scheduler_status()
-    
-    # Build HTML table with jobs
-    jobs_html = ""
-    for job in status.get("jobs", []):
-        trigger_str = str(job.get('trigger', 'N/A')).replace('<', '&lt;').replace('>', '&gt;')
-        next_run = str(job.get('next_run_time', 'N/A'))
-        jobs_html += f"""
-        <tr>
-            <td><code>{job.get('id')}</code></td>
-            <td><strong>{job.get('name')}</strong></td>
-            <td><small>{trigger_str}</small></td>
-            <td><small>{next_run}</small></td>
-            <td>
-                <button type="button" onclick="triggerJob('{job.get('id')}')" class="btn btn-sm btn-primary">
-                    ⚡ Trigger Now
-                </button>
-            </td>
-        </tr>
-        """
-    
-    scheduler_status_text = "🟢 Running" if status.get("running") else "🔴 Stopped"
-    
-    html = f"""
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <title>Scheduler Status - AgilePredictAPI</title>
-        <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@4.6.0/dist/css/bootstrap.min.css">
-        <style>
-            body {{ padding: 20px; background: #f5f5f5; }}
-            .container {{ background: white; border-radius: 8px; padding: 30px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }}
-            .status-badge {{ font-size: 1.2em; padding: 10px 20px; border-radius: 5px; display: inline-block; }}
-            table {{ margin-top: 20px; }}
-            th {{ background: #343a40; color: white; font-weight: 600; }}
-            code {{ background: #f8f9fa; padding: 2px 6px; border-radius: 3px; font-size: 0.9em; }}
-            .btn-primary {{ background: #007bff; border: none; }}
-            .btn-primary:hover {{ background: #0056b3; }}
-            .header-section {{ margin-bottom: 30px; border-bottom: 2px solid #007bff; padding-bottom: 15px; }}
-            .info-text {{ color: #666; margin-top: 10px; }}
-        </style>
-    </head>
-    <body>
-        <div id="auth-check" class="container" style="margin-top: 50px; text-align: center; display: none;">
-            <h2>🔐 Authentication Required</h2>
-            <p class="text-muted">You need to log in to access this page.</p>
-            <p id="auth-message" class="text-warning" style="display: none;"></p>
-            <a href="/api/auth/login?admin=true" class="btn btn-primary btn-lg">Login with Authentik</a>
-        </div>
-        
-        <div id="content" class="container" style="display: none;">
-            <div class="header-section">
-                <h1>⏰ Scheduler Status</h1>
-                <p class="info-text">Manage and monitor scheduled background jobs</p>
-            </div>
-            
-            <div class="alert alert-info">
-                <strong>Status:</strong> <span class="status-badge">{scheduler_status_text}</span>
-            </div>
-            
-            <h3>📋 Scheduled Jobs ({len(status.get('jobs', []))} total)</h3>
-            <table class="table table-striped table-hover">
-                <thead class="table-dark">
-                    <tr>
-                        <th style="width: 150px;">Job ID</th>
-                        <th style="width: 220px;">Job Name</th>
-                        <th>Trigger Schedule</th>
-                        <th>Next Run Time</th>
-                        <th style="width: 150px;">Action</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {jobs_html}
-                </tbody>
-            </table>
-            
-            <hr>
-            <p class="text-muted"><small>💡 Click "⚡ Trigger Now" to manually execute a job immediately. Results will be logged to the Task Logs in the admin panel.</small></p>
-            
-            <div style="margin-top: 20px;">
-                <a href="/admin/task-log/list" class="btn btn-secondary">📖 View Task Logs</a>
-                <a href="/docs" class="btn btn-secondary">📚 API Documentation</a>
-                <a href="/admin/" class="btn btn-secondary">🎛️ Admin Dashboard</a>
-            </div>
-        </div>
-        </div>
-        
-        <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
-        <script src="https://cdn.jsdelivr.net/npm/bootstrap@4.6.0/dist/js/bootstrap.min.js"></script>
-        <script>
-            // Validate token with server before showing content
-            window.addEventListener('DOMContentLoaded', async function() {{
-                const token = localStorage.getItem('access_token');
-                if (!token) {{
-                    showAuthCheck();
-                    return;
-                }}
-                
-                // Validate token with server
-                try {{
-                    const response = await fetch('/api/auth/validate-token', {{
-                        headers: {{
-                            'Authorization': `Bearer ${{token}}`
-                        }}
-                    }});
-                    
-                    if (response.ok) {{
-                        showContent();
-                    }} else if (response.status === 401) {{
-                        // Token expired or invalid - clear it and show login
-                        localStorage.removeItem('access_token');
-                        showAuthCheck("Token expired. Please log in again.");
-                    }} else {{
-                        localStorage.removeItem('access_token');
-                        showAuthCheck();
-                    }}
-                }} catch (error) {{
-                    console.error('Token validation failed:', error);
-                    showAuthCheck();
-                }}
-            }});
-            
-            function showAuthCheck(message = null) {{
-                document.getElementById('auth-check').style.display = 'block';
-                document.getElementById('content').style.display = 'none';
-                if (message) {{
-                    const msgEl = document.getElementById('auth-message');
-                    if (msgEl) {{
-                        msgEl.textContent = message;
-                        msgEl.style.display = 'block';
-                    }}
-                }}
-            }}
-            
-            function showContent() {{
-                document.getElementById('auth-check').style.display = 'none';
-                document.getElementById('content').style.display = 'block';
-            }}
-            
-            function triggerJob(jobId) {{
-                const btn = event.target;
-                const originalText = btn.textContent;
-                btn.disabled = true;
-                btn.textContent = '⏳ Triggering...';
-                const token = localStorage.getItem('access_token');
-                
-                fetch(`/api/tasks/jobs/${{jobId}}/trigger`, {{
-                    method: 'POST',
-                    headers: {{'Content-Type': 'application/json', 'Authorization': token ? `Bearer ${{token}}` : ''}}
-                }})
-                .then(r => {{
-                    if (r.status === 401) {{
-                        window.location.href = '/api/auth/login';
-                        return;
-                    }}
-                    if (!r.ok) throw new Error(`HTTP ${{r.status}}`);
-                    return r.json();
-                }})
-                .then(data => {{
-                    if (data && data.success) {{
-                        btn.textContent = '✅ Success!';
-                        btn.classList.remove('btn-primary');
-                        btn.classList.add('btn-success');
-                        setTimeout(() => {{
-                            btn.textContent = originalText;
-                            btn.classList.remove('btn-success');
-                            btn.classList.add('btn-primary');
-                            btn.disabled = false;
-                        }}, 2000);
-                    }} else {{
-                        throw new Error(data?.message || 'Unknown error');
-                    }}
-                }})
-                .catch(e => {{
-                    btn.textContent = '❌ Error';
-                    btn.classList.remove('btn-primary');
-                    btn.classList.add('btn-danger');
-                    setTimeout(() => {{
-                        btn.textContent = originalText;
-                        btn.classList.remove('btn-danger');
-                        btn.classList.add('btn-primary');
-                        btn.disabled = false;
-                    }}, 3000);
-                    console.error('Error:', e);
-                }});
-            }}
-            
-            // Auto-refresh every 30 seconds
-            setInterval(() => {{
-                location.reload();
-            }}, 30000);
-        </script>
-    </body>
-    </html>
-    """
-    return html
-
 
 # OAuth2 / OIDC Endpoints
 @app.get("/api/auth/login", summary="Initiate OAuth2 Login", include_in_schema=False)
@@ -378,9 +198,6 @@ async def oauth2_callback(request: Request, code: str, state: str):
         if not access_token:
             raise ValueError("No access token in response")
         
-        # Check if this was an admin login
-        redirect_to = "/admin/" if request.query_params.get("admin") else "/scheduler-status"
-        
         # Return HTML that stores token in both localStorage and cookie
         html = f"""
         <html>
@@ -389,7 +206,7 @@ async def oauth2_callback(request: Request, code: str, state: str):
             <p>Authenticating...</p>
             <script>
                 localStorage.setItem('access_token', '{access_token}');
-                window.location.href = '{redirect_to}';
+                window.location.href = '/admin/';
             </script>
         </body>
         </html>

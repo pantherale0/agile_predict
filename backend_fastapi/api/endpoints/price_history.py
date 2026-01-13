@@ -132,12 +132,13 @@ def get_price_heatmap(
     )
 
 
-@router.get("/history/daily/{date_str}", response_model=StatsResponse)
+@router.get("/history/daily/{region}/{date_str}", response_model=StatsResponse)
 def get_daily_breakdown(
+    region: str = Path(...),
     date_str: str = Path(...),
     db: Session = Depends(get_db),
 ):
-    """Get daily price breakdown for a specific date (format: YYYY-MM-DD)."""
+    """Get daily price breakdown for a specific date and region (format: YYYY-MM-DD)."""
     try:
         target_date = datetime.strptime(date_str, "%Y-%m-%d")
     except ValueError:
@@ -146,7 +147,7 @@ def get_daily_breakdown(
             detail="Invalid date format. Use YYYY-MM-DD"
         )
     
-    breakdown_data = StatsService.get_daily_breakdown(db, target_date)
+    breakdown_data = StatsService.get_daily_breakdown(db, region, target_date)
     
     if breakdown_data.get("daily_data") is None:
         return StatsResponse(

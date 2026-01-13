@@ -1,19 +1,78 @@
-.stats-section {
-  background-color: #343a40;
-  padding: 24px;
-  border-radius: 8px;
-  border: 1px solid #495057;
+.stats-page {
+  padding: 2rem 0;
+  background: linear-gradient(135deg, #1a1d23 0%, #16191f 100%);
+  min-height: calc(100vh - 56px);
 }
 
-.stats-section h4 {
+.stats-container {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 0 1rem;
+}
+
+.stats-title {
+  color: #fff;
+  font-weight: 700;
+  font-size: 2.5rem;
+  margin-bottom: 2rem;
+  text-align: center;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+.stats-section {
+  background: rgba(52, 58, 64, 0.7);
+  backdrop-filter: blur(10px);
+  border: 1px solid #495057;
+  border-radius: 12px;
+  padding: 2rem;
+  margin-bottom: 2rem;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+  transition: all 0.3s ease;
+}
+
+.stats-section:hover {
+  border-color: #6c757d;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+}
+
+.section-title {
   color: #fff;
   font-weight: 600;
-  margin-bottom: 12px;
+  font-size: 1.75rem;
+  margin-bottom: 1rem;
+  border-bottom: 2px solid #ffc107;
+  padding-bottom: 0.75rem;
 }
 
-.stats-section p {
+.section-description {
+  color: #adb5bd;
+  font-size: 1rem;
   line-height: 1.6;
-  margin-bottom: 12px;
+  margin-bottom: 1rem;
+}
+
+.section-description:last-of-type {
+  margin-bottom: 1.5rem;
+}
+
+.chart-container {
+  background: #212529;
+  border-radius: 8px;
+  padding: 1rem;
+  border: 1px solid #495057;
+  overflow-x: auto;
+}
+
+.chart-container > div {
+  min-height: 600px;
+}
+
+.image-container {
+  background: #212529;
+  border-radius: 8px;
+  padding: 1rem;
+  border: 1px solid #495057;
+  text-align: center;
 }
 
 .trend-image {
@@ -21,29 +80,145 @@
   max-width: 100%;
   height: auto;
   border-radius: 8px;
+  border: 1px solid #495057;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.diagnostic-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(500px, 1fr));
+  gap: 1.5rem;
+  margin-top: 1.5rem;
+}
+
+.diagnostic-card {
+  background: #212529;
+  border: 1px solid #495057;
+  border-radius: 8px;
+  overflow: hidden;
+  transition: all 0.3s ease;
+  display: flex;
+  flex-direction: column;
+}
+
+.diagnostic-card:hover {
+  border-color: #6c757d;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+.diagnostic-card.full-width {
+  grid-column: 1 / -1;
+}
+
+.diagnostic-header {
+  background: #343a40;
+  padding: 1rem;
+  border-bottom: 1px solid #495057;
+}
+
+.diagnostic-title {
+  color: #ffc107;
+  font-weight: 600;
+  font-size: 1.25rem;
+  margin: 0;
+}
+
+.diagnostic-description {
+  color: #adb5bd;
+  padding: 1rem;
+  font-size: 0.95rem;
+  line-height: 1.5;
+  margin: 0;
+  border-bottom: 1px solid #495057;
+}
+
+.diagnostic-image-wrapper {
+  padding: 1rem;
+  flex-grow: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #1a1d23;
 }
 
 .diagnostic-image {
   width: 100%;
-  max-width: 100%;
   height: auto;
+  max-width: 100%;
+  border-radius: 6px;
+}
+
+/* Loading and error states */
+.alert {
   border-radius: 8px;
-  border: 1px solid #495057;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-  background-color: #212529;
-  padding: 8px;
+  font-size: 1rem;
 }
 
-.text-muted {
-  color: #adb5bd !important;
+.alert-info {
+  background-color: #1c3144;
+  border-color: #0c5460;
+  color: #0c5460;
 }
 
-.text-light {
-  color: #f8f9fa !important;
+.alert-warning {
+  background-color: #332701;
+  border-color: #856404;
+  color: #856404;
 }
 
-h2 {
-  color: #fff;
-  font-weight: 600;
+.alert-danger {
+  background-color: #321;
+  border-color: #721c24;
+  color: #721c24;
+}
+
+.spinner-border {
+  color: #ffc107;
+}
+
+/* Responsive adjustments */
+@media (max-width: 1200px) {
+  .diagnostic-grid {
+    grid-template-columns: 1fr;
+  }
+  
+  .diagnostic-card.full-width {
+    grid-column: 1;
+  }
+
+  .stats-title {
+    font-size: 2rem;
+  }
+
+  .section-title {
+    font-size: 1.5rem;
+  }
+}
+
+@media (max-width: 768px) {
+  .stats-page {
+    padding: 1rem 0;
+  }
+
+  .stats-container {
+    padding: 0 0.75rem;
+  }
+
+  .stats-section {
+    padding: 1.5rem;
+    margin-bottom: 1.5rem;
+  }
+
+  .stats-title {
+    font-size: 1.75rem;
+    margin-bottom: 1.5rem;
+  }
+
+  .section-title {
+    font-size: 1.25rem;
+  }
+
+  .diagnostic-grid {
+    gap: 1rem;
+  }
 }

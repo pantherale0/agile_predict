@@ -87,14 +87,6 @@
     },  ],
   "compounds": [
     {
-      "name": "Full Stack Debug",
-      "configurations": [
-        "React Frontend",
-        "Django Backend"
-      ],
-      "stopAll": true
-    },
-    {
       "name": "Full Stack (FastAPI)",
       "configurations": [
         "React Frontend",

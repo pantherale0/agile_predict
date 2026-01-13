@@ -54,10 +54,26 @@ class StatsService:
         daily_avg['day_of_week'] = daily_avg['date'].dt.day_name()
         daily_avg['day_num'] = daily_avg['date'].dt.dayofweek  # 0=Mon, 6=Sun
         
-        # Create pivot table for heatmap (days x weeks)
+        # Create a sequential week index that preserves date order (not ISO week number)
+        # Group consecutive dates into weeks starting Monday
+        daily_avg['date_ordinal'] = daily_avg['date'].apply(lambda d: d.toordinal())
+        daily_avg['week_start'] = daily_avg['date'] - pd.to_timedelta(daily_avg['day_num'], unit='D')
+        week_starts = daily_avg['week_start'].unique()
+        week_to_index = {ws: idx for idx, ws in enumerate(sorted(week_starts))}
+        daily_avg['week_index'] = daily_avg['week_start'].map(week_to_index)
+        
+        # Track year transitions for markers
+        year_transitions = []
+        current_year = None
+        for _, row in daily_avg.iterrows():
+            if current_year != row['year']:
+                current_year = row['year']
+                year_transitions.append(row['week_index'])
+        
+        # Create pivot table for heatmap using sequential week index
         pivot = daily_avg.pivot_table(
             index='day_num',
-            columns='week',
+            columns='week_index',
             values='agile',
             aggfunc='mean'
         )
@@ -65,19 +81,19 @@ class StatsService:
         # Create a date mapping for clicking
         date_mapping = {}
         for _, row in daily_avg.iterrows():
-            week = row['week']
-            day_num = row['day_num']
+            week_idx = int(row['week_index'])
+            day_num = int(row['day_num'])
             date_str = row['date'].strftime('%Y-%m-%d')
-            date_mapping[f"{int(week)}_{int(day_num)}"] = date_str
+            date_mapping[f"{week_idx}_{day_num}"] = date_str
         
         # Create customdata array for dates
         customdata = []
         for row_idx in range(len(pivot.index)):
             row_data = []
             for col_idx in range(len(pivot.columns)):
-                week = int(pivot.columns[col_idx])
+                week_idx = int(pivot.columns[col_idx])
                 day_num = int(pivot.index[row_idx])
-                date_str = date_mapping.get(f"{week}_{day_num}", "")
+                date_str = date_mapping.get(f"{week_idx}_{day_num}", "")
                 row_data.append(date_str)
             customdata.append(row_data)
         
@@ -94,16 +110,27 @@ class StatsService:
             hovertemplate="Week %{x}<br>%{y}<br>Date: %{customdata}<br>Avg Price: £%{z:.2f}/kWh<extra></extra>"
         ))
         
+        # Add year transition markers (vertical lines)
+        for year_week_idx in year_transitions:
+            fig.add_vline(
+                x=year_week_idx - 0.5,
+                line_dash="dash",
+                line_color="rgba(200, 200, 200, 0.5)",
+                annotation_text=f"Year {int(daily_avg[daily_avg['week_index'] >= year_week_idx].iloc[0]['year'])}",
+                annotation_position="top"
+            )
+        
         fig.update_layout(
-            title="Daily Average Agile Price - Last 365 Days",
-            xaxis_title="Week of Year",
+            title="Historical Average Agile Price",
             yaxis_title="Day of Week",
             template="plotly_dark",
             plot_bgcolor="#212529",
             paper_bgcolor="#343a40",
             font={"color": "#ccc"},
             height=400,
-            hovermode='closest'
+            hovermode='closest',
+            xaxis={"fixedrange": True},
+            yaxis={"fixedrange": True},
         )
         
         # Convert to JSON
@@ -130,6 +157,7 @@ class StatsService:
     @staticmethod
     def get_daily_breakdown(
         db: Session,
+        region: str,
         target_date: datetime,
     ) -> Dict[str, Any]:
         """Get detailed price breakdown for a specific date."""
@@ -138,6 +166,7 @@ class StatsService:
         day_end = datetime.combine(target_date.date(), datetime.max.time())
         
         prices = db.query(PriceHistory).filter(
+            PriceHistory.region == region.upper(),
             PriceHistory.date_time >= day_start,
             PriceHistory.date_time <= day_end,
         ).order_by(PriceHistory.date_time).all()

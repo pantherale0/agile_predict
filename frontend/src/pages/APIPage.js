@@ -3,9 +3,6 @@ import React from 'react';
 function APIPage() {
   return (
     <div className="container-lg">
-      <div className="row bg-body text-center py-4">
-        <h2>API and Home Assistant</h2>
-      </div>
       <div className="row">
         <div className="col-12">
           <div className="card">
@@ -15,23 +12,26 @@ function APIPage() {
                 The AgilePredict API provides endpoints to access regional electricity price forecasts and historical data.
               </p>
               <h6>Base URL</h6>
-              <code>http://localhost:8000/api</code>
-              
-              <h6 className="mt-4">Endpoints</h6>
-              <ul>
-                <li><code>GET /forecast/</code> - Get forecast data</li>
-                <li><code>GET /forecast/?region=X&days=14</code> - Get forecast for specific region and days</li>
-                <li><code>GET /history/</code> - Get historical price data</li>
-              </ul>
+              <code>{window.CONFIG.API_URL}</code>
+              <p/>
+              <h6>Docs URL</h6>
+              <code>{window.CONFIG.API_URL.replace('/api', '/')}docs</code>
 
               <h6 className="mt-4">Home Assistant Integration</h6>
               <p>You can integrate AgilePredict with Home Assistant using a REST sensor:</p>
               <pre><code>{`sensor:
   - platform: rest
-    resource: http://localhost:8000/api/forecast/?region=X&days=1
+    resource: ${window.CONFIG.API_URL}/forecasts/X/latest?days=7
     name: "Agile Price Forecast"
     value_template: "{{ value_json[0].agile_pred }}"
     unit_of_measurement: "p/kWh"`}</code></pre>
+              <p>Replace <code>X</code> with your desired region code. A list can be found in the Region menu in the navigation bar.</p>
+
+              <h6 className="mt-4">Authentication</h6>
+              <p>No authentication is required to access the AgilePredict API.</p>
+
+              <h6 className="mt-4">Rate Limiting</h6>
+              <p>Please limit your requests to a maximum of 20 requests per hour to avoid being rate limited.</p>
             </div>
           </div>
         </div>

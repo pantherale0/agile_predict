@@ -1,0 +1,189 @@
+@import url('https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css');
+
+/* Hide ForecastSettingsButton on all screens */
+.forecast-settings-btn {
+  display: none !important;
+}
+
+.navbar {
+  padding: 0 !important;
+  overflow: visible !important;
+  box-sizing: border-box !important;
+  position: relative !important;
+  z-index: 1030 !important;
+}
+
+/* Navbar container */
+.navbar-container {
+  display: flex !important;
+  align-items: center !important;
+  width: 100% !important;
+  padding: 0.5rem !important;
+  gap: 0.5rem !important;
+  box-sizing: border-box !important;
+  position: relative !important;
+}
+
+/* Toggle button on the left */
+.navbar-toggler-left {
+  margin: 0;
+  padding: 0;
+  flex-shrink: 0;
+  width: 2.625rem;
+  height: 2.625rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+}
+
+/* Page title */
+.navbar-title {
+  flex: 1;
+  text-align: center;
+  margin: 0;
+  font-size: 1rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+/* Settings button on the right */
+.navbar-settings-btn {
+  margin: 0;
+  padding: 0;
+  flex-shrink: 0;
+  width: 2.625rem;
+  height: 2.625rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.25rem;
+  box-sizing: border-box;
+}
+
+/* Navigation menu - collapsed on mobile */
+.collapse.navbar-collapse {
+  width: 100% !important;
+  padding: 0.5rem !important;
+  box-sizing: border-box !important;
+  transition: all 0.3s ease !important;
+  overflow: visible !important;
+}
+
+.collapse.navbar-collapse.show {
+  padding: 0.5rem !important;
+}
+
+.navbar-nav {
+  display: flex !important;
+  flex-direction: column !important;
+  width: 100% !important;
+  gap: 0 !important;
+  margin: 0 !important;
+  overflow: visible !important;
+}
+
+.nav-item {
+  position: relative !important;
+}
+
+/* Dropdown menu base styles */
+.dropdown-menu {
+  position: absolute !important;
+  top: 100% !important;
+  left: 0 !important;
+  z-index: 1040 !important;
+  min-width: 200px !important;
+  overflow: visible !important;
+}
+
+/* Desktop layout */
+@media (min-width: 992px) {
+  /* Make navbar a flex row */
+  .navbar {
+    display: flex !important;
+    align-items: center !important;
+    padding: 0.5rem !important;
+    gap: 0.5rem !important;
+    box-sizing: border-box !important;
+    overflow: visible !important;
+  }
+
+  /* Hide toggle on desktop */
+  .navbar-toggler-left {
+    display: none !important;
+  }
+
+  /* Navigation menu on the left */
+  .collapse.navbar-collapse {
+    order: 1 !important;
+    width: auto !important;
+    padding: 0 !important;
+    display: flex !important;
+    align-items: center !important;
+    flex: 0 0 auto !important;
+    overflow: visible !important;
+  }
+
+  /* Title in the middle - centered with equal space on both sides */
+  .navbar-title {
+    position: absolute !important;
+    left: 50% !important;
+    transform: translateX(-50%) !important;
+    font-size: 1.25rem !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+    max-width: calc(100% - 200px) !important;
+  }
+
+  /* Settings button on the right */
+  .navbar-settings-btn {
+    margin-left: auto !important;
+    flex: 0 0 auto !important;
+    margin: 0 !important;
+  }
+
+  /* Nav items in a row */
+  .navbar-nav {
+    flex-direction: row !important;
+    gap: 0 !important;
+    margin: 0 !important;
+    width: auto !important;
+    overflow: visible !important;
+  }
+
+  .nav-item {
+    display: flex !important;
+    align-items: center !important;
+    position: relative !important;
+  }
+
+  .dropdown-menu {
+    position: absolute !important;
+    top: 100% !important;
+    z-index: 1040 !important;
+  }
+}
+
+/* Mobile layout */
+@media (max-width: 991px) {
+  .navbar-container {
+    justify-content: space-between;
+  }
+
+  .navbar-title {
+    font-size: 1rem;
+    flex: 1;
+    min-width: 0;
+  }
+
+  .collapse.navbar-collapse {
+    padding: 0.5rem;
+  }
+}
